@@ -855,7 +855,7 @@ pub fn run() {
             doc_read, doc_write, nb_load, nb_save, nb_delete, nb_duplicate, index_load, index_save, page_load, page_save, search,
             asset_put, asset_get, thumb_save, thumb_get, file_read, file_write, temp_file, ocr, library_info, library_choose,
             backup_export, backup_import, pending_open, app_flushed, devtools, is_test, memory_mode, boot,
-            ai::secret_set, ai::secret_has, ai::secret_delete, ai::ai_fetch, study_file_put, study_file_get, web_preview_create, web_window_open, present_open,
+            ai::secret_set, ai::secret_has, ai::secret_delete, ai::ai_fetch, ai::ai_fetch_stream, ai::ai_fetch_cancel, study_file_put, study_file_get, web_preview_create, web_window_open, present_open,
             library_save, library_scan, file_open, item_reveal, file_rename, file_move, file_import, file_trash,
             ink::ink_analyze
         ])
