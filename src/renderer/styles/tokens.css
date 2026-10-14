@@ -1,0 +1,69 @@
+/* goodink design tokens (redesign 2026-10). Components use these, never raw values. */
+:root {
+  --c-bg: #f4f5f7;
+  --c-surface: #ffffff;
+  --c-surface-2: #f1f2f5;
+  --c-canvas: #eef0f3;
+  --c-border: #e3e6eb;
+  --c-border-input: #8a909c;
+  --c-text: #1c1f26;
+  --c-text-muted: #5e6573;
+  --c-accent: #2f5b8a;
+  --c-accent-soft: #e6edf5;
+  --c-on-accent: #ffffff;
+  --c-danger: #b0391f;
+  --c-success: #2f7a52;
+  --c-warning: #8f5a00;
+  --c-focus: #2f5b8a;
+  --c-scrim: rgba(28, 31, 38, 0.32);
+  --c-hover: rgba(28, 31, 38, 0.05);
+  --c-press: rgba(28, 31, 38, 0.09);
+
+  --font-sans: 'Geist Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Geist Variable', 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Cascadia Code', Consolas, monospace;
+
+  --t-xs: 500 11px/14px var(--font-sans);
+  --t-sm: 400 13px/18px var(--font-sans);
+  --t-base: 400 14px/20px var(--font-sans);
+  --t-lg: 600 17px/24px var(--font-display);
+  --t-xl: 700 24px/30px var(--font-display);
+  --t-display: 700 30px/36px var(--font-display);
+
+  --s-1: 2px; --s-2: 4px; --s-3: 8px; --s-4: 12px; --s-5: 16px; --s-6: 20px; --s-7: 24px; --s-8: 32px; --s-9: 48px;
+  --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-xl: 18px; --r-pill: 999px;
+
+  --sh-card: 0 1px 2px rgba(28, 31, 38, 0.06);
+  --sh-page: 0 1px 2px rgba(28, 31, 38, 0.10), 0 12px 32px rgba(28, 31, 38, 0.10);
+  --sh-pop: 0 14px 36px rgba(28, 31, 38, 0.16), 0 2px 6px rgba(28, 31, 38, 0.06);
+
+  --m-fast: 110ms; --m-base: 180ms; --m-slow: 280ms; --m-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --l-titlebar: 40px; --l-toolbar: 56px; --l-subbar: 52px; --l-navigator: 212px;
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --c-bg: #0c0f15;
+  --c-surface: #161b25;
+  --c-surface-2: #1b212d;
+  --c-canvas: #0a0c11;
+  --c-border: #2c3443;
+  --c-border-input: #6b7385;
+  --c-text: #e8ebf0;
+  --c-text-muted: #9aa3b2;
+  --c-accent: #9dbbdb;
+  --c-accent-soft: #1f2c3d;
+  --c-on-accent: #12161f;
+  --c-danger: #e9917c;
+  --c-success: #7fc39b;
+  --c-warning: #e0b45e;
+  --c-focus: #9dbbdb;
+  --c-scrim: rgba(0, 0, 0, 0.55);
+  --c-hover: rgba(255, 255, 255, 0.05);
+  --c-press: rgba(255, 255, 255, 0.1);
+  --sh-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --sh-page: 0 1px 3px rgba(0, 0, 0, 0.5), 0 12px 32px rgba(0, 0, 0, 0.4);
+  --sh-pop: 0 14px 36px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+  color-scheme: dark;
+}

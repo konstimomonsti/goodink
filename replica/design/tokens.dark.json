@@ -1,0 +1,27 @@
+{
+  "_about": "goodink design tokens (dark). Same roles as tokens.json.",
+  "color": {
+    "bg": "#121214",
+    "surface": "#1d1d21",
+    "surface-2": "#26262b",
+    "canvas": "#0b0b0d",
+    "border": "#34343b",
+    "border-input": "#7f7f8a",
+    "text": "#f1f1f4",
+    "text-muted": "#a6a6b0",
+    "accent": "#7d9cff",
+    "accent-soft": "#25304f",
+    "on-accent": "#0c1330",
+    "danger": "#ff7a7a",
+    "success": "#5ad08f",
+    "warning": "#f0b45a",
+    "focus": "#7d9cff"
+  },
+  "pairs": [
+    ["text", "bg"], ["text", "surface"], ["text", "surface-2"],
+    ["text-muted", "bg"], ["text-muted", "surface"], ["text-muted", "surface-2"],
+    ["on-accent", "accent"], ["accent", "surface"], ["accent", "accent-soft"], ["text", "accent-soft"],
+    ["danger", "surface"], ["success", "surface"], ["warning", "surface"],
+    ["border-input", "surface", "ui"], ["focus", "surface", "ui"], ["focus", "bg", "ui"]
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "goodink",
+  "version": "3.0.1",
+  "identifier": "app.goodink.notes",
+  "build": {
+    "beforeDevCommand": "npm run dev:web",
+    "devUrl": "http://localhost:5199",
+    "beforeBuildCommand": "npm run build:web",
+    "frontendDist": "../dist/renderer"
+  },
+  "app": {
+    "windows": [],
+    "withGlobalTauri": false,
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://gink.localhost https://i.ytimg.com; frame-src https://www.youtube-nocookie.com; media-src 'self' blob: mediastream: http://gink.localhost; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost http://gink.localhost blob: data:; font-src 'self' data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "goodink",
+    "copyright": "Copyright © 2026 goodink",
+    "shortDescription": "Handwritten notes and PDF annotation",
+    "longDescription": "Handwritten notes and PDF annotation for Windows pen devices.",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
+    "fileAssociations": [
+      { "ext": ["gink"], "name": "goodink Notebook", "description": "goodink notebook backup", "role": "Editor" }
+    ],
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "nsis": {
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico",
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "name": "goodink",
+  "productName": "goodink",
+  "version": "3.0.1",
+  "description": "Handwritten notes and PDF annotation for Windows pen devices",
+  "author": "goodink",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "dev": "tauri dev",
+    "dev:web": "node scripts/copy-pdfjs.mjs && vite",
+    "build:web": "npm run typecheck && node scripts/copy-pdfjs.mjs && vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "tauri build --no-bundle",
+    "dist": "tauri build",
+    "tauri": "tauri",
+    "test:unit": "node --test --experimental-strip-types \"tests/unit/*.test.ts\"",
+    "test:app": "node tests/drive-tauri.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.132.1",
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
+    "@tauri-apps/api": "^2.12.1",
+    "@tauri-apps/plugin-clipboard-manager": "^2.4.1",
+    "@tauri-apps/plugin-dialog": "^2.8.1",
+    "@tauri-apps/plugin-opener": "^2.7.0",
+    "dompurify": "^3.4.16",
+    "katex": "^0.19.0",
+    "lucide-react": "^1.52.0",
+    "openai": "^7.31.0",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.4.299",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@tauri-apps/cli": "^2.12.1",
+    "@types/katex": "^0.16.8",
+    "@types/node": "^26.6.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.3"
+  }
+}

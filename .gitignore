@@ -1,0 +1,15 @@
+node_modules
+dist
+release
+src/renderer/public/pdfjs
+*.tmp
+test-results
+playwright-report
+dist-installer
+dist-test
+builds
+
+src-tauri/target
+src-tauri/gen/schemas
+tests/shots
+.claude/*.lock
