@@ -69,16 +69,34 @@ test('highlighter, tape and shapes are ignored', () => {
   assert.equal(blocks[0].lines[0].strokeIds.length, s.length);
 });
 
-test('500 strokes group in under 2 ms', () => {
+test('500 strokes group in under 2 ms', async () => {
   const s: Stroke[] = [];
   for (let r = 0; s.length < 500; r++) s.push(...write(r % 3 ? '3x-5=10+2y' : 'the sum of the parts', 40 + (r % 2) * 280, 60 + Math.floor(r / 2) * 48, { size: 18, seed: r }));
-  for (let i = 0; i < 5; i++) groupStrokes('p', s); // warm the JIT
-  // best of a few batches: the test runner shares the CPU with other test files
-  let ms = Infinity;
-  for (let b = 0; b < 12; b++) {
-    const t = performance.now();
-    for (let i = 0; i < 4; i++) groupStrokes('p', s);
-    ms = Math.min(ms, (performance.now() - t) / 4);
+  const BUDGET_PER_STROKE = 2 / 500; // ms: the SPEC's 2 ms for a 500-stroke page
+  const median = (xs: number[]) => xs.slice().sort((a, b) => a - b)[xs.length >> 1];
+  // fresh stroke objects: the cold cost (no per-stroke caches), the worst case after a page loads
+  const fresh = () => s.map((x) => ({ ...x }));
+  for (let i = 0; i < 10; i++) groupStrokes('p', fresh()); // warm the JIT
+  // The test runner shares the CPU with other test files (and the machine with builds), which only
+  // ever makes a run slower. So: median of 9 runs, and up to 4 attempts a moment apart; one
+  // attempt within budget proves the code is fast enough.
+  let warm = Infinity, cold = Infinity;
+  for (let attempt = 0; attempt < 4 && !(warm <= 500 * BUDGET_PER_STROKE && cold <= 500 * BUDGET_PER_STROKE * 2); attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, 150));
+    const w: number[] = [], c: number[] = [];
+    for (let i = 0; i < 9; i++) {
+      let t = performance.now();
+      groupStrokes('p', s);
+      w.push(performance.now() - t);
+      const f = fresh();
+      t = performance.now();
+      groupStrokes('p', f);
+      c.push(performance.now() - t);
+    }
+    warm = Math.min(warm, median(w));
+    cold = Math.min(cold, median(c));
   }
-  assert.ok(ms < 2, `grouping took ${ms.toFixed(2)} ms`);
+  assert.ok(warm / 500 <= BUDGET_PER_STROKE, `grouping 500 unchanged strokes took ${warm.toFixed(2)} ms`);
+  // first sight of every stroke (features, pair distances) may take twice as long
+  assert.ok(cold / 500 <= BUDGET_PER_STROKE * 2, `grouping 500 new strokes took ${cold.toFixed(2)} ms`);
 });

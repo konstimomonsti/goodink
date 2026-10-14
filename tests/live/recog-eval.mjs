@@ -36,6 +36,7 @@ export default async ({ win, shot }) => {
   const jobs = [];
   for (const jitter of jitters) for (const seed of seeds) for (const item of corpus) jobs.push({ ...item, jitter, seed });
   const rows = [];
+  const pages = []; // the captured ink, for replaying offline
   for (let p = 0; p < jobs.length; p += PER_PAGE) {
     const batch = jobs.slice(p, p + PER_PAGE);
     await clearPage(win);
@@ -45,6 +46,7 @@ export default async ({ win, shot }) => {
     }
     if (p === 0) await shot('recog-eval-page');
     const { pageId, strokes } = await pageStrokes(win);
+    pages.push({ batch: batch.map((j) => ({ write: j.write, expect: j.expect, kind: j.kind, jitter: j.jitter, seed: j.seed })), strokes: strokes.map((s) => ({ id: s.id, kind: s.kind, pts: s.pts.map((v) => Math.round(v * 100) / 100) })) });
     const res = await win.evaluate(
       async ({ pageId, strokes }) => {
         const m = window.__recog;
@@ -118,4 +120,5 @@ export default async ({ win, shot }) => {
   };
   console.log(JSON.stringify(summary, null, 2));
   fs.writeFileSync('tests/shots/recog-eval.json', JSON.stringify({ summary, rows }, null, 1));
+  fs.writeFileSync('tests/shots/recog-eval-ink.json', JSON.stringify(pages));
 };

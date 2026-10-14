@@ -95,6 +95,10 @@ function shapeCost(c: string, s: Sym, run: Run, tall: number): number {
   if (tall && DIGIT.test(c) && !s.flat && !s.dot && s.h < tall * 0.74) return 2.2;
   // digits sit on the baseline; a glyph reaching well under it is a letter (y, g, p), not 4 or 9
   if (DIGIT.test(c) && !s.flat && s.y1 > run.base + run.hh * 0.3 && s.y0 > run.mid - run.hh * 0.6) return 1.5;
+  // operators are smaller than digits (an f is not a +); x does not reach under the baseline (y does)
+  if ((c === '+' || c === '=') && tall && s.h > tall * 0.92) return 1.2;
+  if ('xX×'.includes(c) && s.y1 > run.base + run.hh * 0.3) return 1;
+  if (c === '/' && s.ink.length > 1) return 1; // a slash is one stroke (y is two)
   // 1 is narrow, 7 has a top bar
   if (c === '1' && s.w > s.h * 0.45) return 1;
   if (c === '7' && s.w < s.h * 0.25) return 1;
@@ -203,12 +207,18 @@ function normalise(pieces: Piece[], run: Run): number {
     // two touching crosses read as two chars ("x+" drawn as one blob): judge each half on its own
     const half = !single && p.chars.length === 2 && p.syms.length === 1 && s.ink.length === 4 ? s.ink.slice().sort((a, b) => a.cx - b.cx) : null;
     const cross = single ? crossKind(s) : half ? crossKind(symOf(cs[i - 1]?.p !== p ? half.slice(0, 2) : half.slice(2))) : null;
-    if (cross === 'plus' && !DIGIT.test(c) || (cross === 'plus' && c === '4')) {
+    if (cross === 'plus') {
       // an upright cross is a plus; a 't' too, unless it ends a term like 3t+1 (a variable t)
       if (c !== 't' || !(isOperandL(l) && (!r || /[-+=×÷)]/.test(r)))) set(i, '+');
       continue;
     }
     if (cross === 'cross' && c === '+') set(i, 'x');
+    // function notation: a tall two-stroke glyph read as + or x right before "(" is an f
+    const tallRef0 = tallRef(run.syms);
+    if ('+xX×t'.includes(c) && r === '(' && single && s.ink.length === 2 && tallRef0 && s.h > tallRef0 * 0.85 && (!l || !isOperandL(l))) {
+      set(i, 'f');
+      continue;
+    }
     if ('xX×'.includes(cs[i].c)) {
       // × floats above the baseline and is smaller than the letters; x sits on the baseline
       const raised = !!s && s.y1 < run.base - run.hh * 0.12 && s.h < run.hh * 0.85;
@@ -315,6 +325,24 @@ function symsOfWord(run: Run, words: WordIn[]): Sym[][] {
 /** cost of taking the recogniser's n-th alternate instead of its first */
 const RANK_COST = 0.45;
 
+/**
+ * The run's text with an operand placeholder where a fraction, root or script sits between its
+ * glyphs, so "1/2 + 1/3 = 5/6" is not judged as "+=".
+ */
+function withStructures(pieces: Piece[], run: Run): string {
+  const xs = run.items.filter((it) => it.t === 'frac' || it.t === 'sqrt').map((it) => it.x0).sort((a, b) => a - b);
+  let out = '', k = 0;
+  for (const p of pieces) {
+    const x = p.syms.length ? p.syms[0].x0 : -Infinity;
+    while (k < xs.length && xs[k] < x) {
+      out += 'F';
+      k++;
+    }
+    out += p.chars;
+  }
+  return out + 'F'.repeat(xs.length - k);
+}
+
 const clonePieces = (ps: Piece[]) => ps.map((p) => ({ chars: p.chars, syms: p.syms }));
 
 /** The best few readings of a math run, cheapest first. */
@@ -344,7 +372,7 @@ function readMathRun(run: Run, words: WordIn[], isScript: boolean): RunReading[]
     const pieces = clonePieces(p.pieces);
     const subs = normalise(pieces, run);
     const text = pieces.map((x) => x.chars).join('');
-    return { pieces, cost: p.cost + subs * 0.15 + implausible(text, isScript), text };
+    return { pieces, cost: p.cost + subs * 0.15 + implausible(withStructures(pieces, run), isScript), text };
   });
   done.sort((a, b) => a.cost - b.cost);
   const uniq: RunReading[] = [];

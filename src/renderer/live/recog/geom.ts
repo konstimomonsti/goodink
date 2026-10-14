@@ -69,9 +69,9 @@ export function inkOf(s: { id: string; pts: ArrayLike<number> }): Ink {
   return { id: s.id, pts: p, x0, y0, x1, y1, w, h, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, straight, flat: false, dot: false };
 }
 
-const median = (a: number[]) => {
+const median = (a: ArrayLike<number>) => {
   if (!a.length) return 0;
-  const s = a.slice().sort((x, y) => x - y);
+  const s = Float64Array.from(a).sort(); // typed sort: numeric and fast
   return s[s.length >> 1];
 };
 
@@ -80,9 +80,11 @@ const median = (a: number[]) => {
  * The unit is about the height of a digit; dots and bars are judged against it.
  */
 export function classify(inks: Ink[]): number {
-  const size = inks.map((k) => Math.max(k.w, k.h));
+  const size = new Float64Array(inks.length);
+  for (let i = 0; i < inks.length; i++) size[i] = Math.max(inks[i].w, inks[i].h);
   const rough = median(size) || 10;
-  const tall = inks.filter((k) => k.h > rough * 0.35).map((k) => k.h);
+  const tall: number[] = [];
+  for (const k of inks) if (k.h > rough * 0.35) tall.push(k.h);
   const unit = Math.max(2, median(tall) || rough);
   for (const k of inks) {
     k.dot = Math.max(k.w, k.h) < unit * 0.28;
@@ -144,12 +146,29 @@ export function findFractions(inks: Ink[], unit: number): Frac[] {
   const used = new Set<Ink>();
   // widest bars first, so a bar inside a numerator doesn't steal its parent's ink
   const bars = inks.filter((k) => k.flat && k.w > unit * 0.55).sort((a, b) => b.w - a.w);
+  if (!bars.length) return out;
+  // strokes by centre x, so each bar only looks at the strokes over its span
+  const byX = inks.slice().sort((a, b) => a.cx - b.cx);
+  const cxs = Float64Array.from(byX, (k) => k.cx);
+  const lower = (v: number) => {
+    let lo = 0, hi = cxs.length;
+    while (lo < hi) {
+      const m = (lo + hi) >> 1;
+      if (cxs[m] < v) lo = m + 1;
+      else hi = m;
+    }
+    return lo;
+  };
   for (const bar of bars) {
     if (used.has(bar)) continue;
     const span0 = bar.x0 - bar.w * 0.08, span1 = bar.x1 + bar.w * 0.08;
-    const inSpan = (k: Ink) => k !== bar && !used.has(k) && k.cx >= span0 && k.cx <= span1;
-    let num = inks.filter((k) => inSpan(k) && k.cy < bar.cy && k.y1 <= bar.cy + unit * 0.12 && k.y1 >= bar.cy - unit * 1.6);
-    let den = inks.filter((k) => inSpan(k) && k.cy > bar.cy && k.y0 >= bar.cy - unit * 0.12 && k.y0 <= bar.cy + unit * 1.6);
+    let num: Ink[] = [], den: Ink[] = [];
+    for (let i = lower(span0); i < byX.length && cxs[i] <= span1; i++) {
+      const k = byX[i];
+      if (k === bar || used.has(k)) continue;
+      if (k.cy < bar.cy && k.y1 <= bar.cy + unit * 0.12 && k.y1 >= bar.cy - unit * 1.6) num.push(k);
+      else if (k.cy > bar.cy && k.y0 >= bar.cy - unit * 0.12 && k.y0 <= bar.cy + unit * 1.6) den.push(k);
+    }
     // the parts must start close to the bar
     const near = (set: Ink[], above: boolean) => set.some((k) => !k.flat && !k.dot && (above ? bar.cy - k.y1 : k.y0 - bar.cy) < unit * 0.75);
     if (!near(num, true) || !near(den, false)) continue;
