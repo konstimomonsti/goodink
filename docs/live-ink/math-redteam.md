@@ -215,3 +215,126 @@ because it is a first line or a bare problem statement.
 `todo` here must pass, alongside a precision measurement on real notebook pages rather than generated corpora.
 Until then, downgrade "Not a solution" and "Derivative slip" findings to `unsure` whenever the line involves
 a decimal approximation or a prime.
+
+---
+
+# Round 2: attacks on the round-1 fixes
+
+After the round-1 fixes (all 88 hand false reds resolved), the new heuristics became the attack surface. The
+suite gained a `describe('round 2')` block in `tests/unit/mathcheck-redteam.test.ts` with 291 new hand cases
+and 9 seeded families of 150 blocks each:
+
+- 154 sound blocks and 83 wrong-and-caught blocks, all hard assertions that pass today;
+- 26 false reds, 37 wrong green ticks and 24 recall misses, all `todo`;
+- 15 good and 8 wrong live results, plus 1 spacing-invariance check.
+
+The full file runs with 258 tests: 139 pass, 0 fail, 119 todo.
+
+**Verdict:** the derivative resolution and the degree reading of `sin(30)` are solid. The rounding tolerance
+is the weak point. It is too narrow, so whole-number, significant-figure and scientific-notation roundings
+are still red. It is also too loose, so exact decimal answers that are off by one unit in the last digit get
+a green tick.
+
+## P0: new false reds
+
+| Id | Example | Verdict | Why it is correct |
+|---|---|---|---|
+| R2-FP-1 | `K=1000·1.05^3 ;; K=1158` | `error` "Not a solution" | 1157.625 rounded to whole euros |
+| R2-FP-1 | `A=π·5^2 ;; A=79`, `A=π·10^2 ;; A=314` | `error` | 78.54 → 79, 314.16 → 314 |
+| R2-FP-1 | `x=12345/7 ;; x=1764`, `x^2=20000 ;; x=141` | `error` | rounded to a whole number |
+| R2-FP-2 | `x=12345/7 ;; x=1760`, `x=1518/5 ;; x=304` | `error` | 3 significant figures |
+| R2-FP-3 | `x=1/3000 ;; x=3.3·10^-4`, `x=6.02·10^23/3 ;; x=2.01·10^23` | `error` | scientific notation, 2–3 s.f. |
+| R2-FP-4 | `f(x)=sin(x) ;; f(30)=0.5`, `f(x)=cos(x) ;; f(60)=0.5` | `error` "Arithmetic slip" | `sin(30)=0.5` is `ok`, but through a defined function it is radians-only |
+| R2-FP-5 | `v=3t^2 ;; a=v'`, `y=2x+3 ;; m=y'=2`, `y=x^2 ;; k=y'` | `error` "Derivative slip" | naming a derivative is a definition, not an identity claim |
+
+The "within one unit of the last digit" rule only helps when the answer has decimal places. The seeded
+families show where it stops:
+
+| Family | Red |
+|---|---|
+| p/q rounded to a whole number | 88% |
+| p/q rounded to 3 significant figures | 97% |
+| p/q in scientific notation | 61% |
+| p/q rounded to 1, 2 or 3 decimal places | 0% |
+| √n to 2 decimal places, both roots | 0% |
+
+## Wrong green ticks: mistakes confirmed as `ok`
+
+**R2-G-1: the exact answer is a short decimal, and an answer one unit off passes.**
+- `x=0.1+0.2 ;; x=0.31`, `x=7.1+0.1 ;; x=7.19`, `x=99·1.1 ;; x=108.8` and `2x+3=7 ;; x=1.99` are all `ok`.
+- `100x=1 ;; x=0.02` and `x^2=0.0001 ;; x=0.02` are `ok`, although the answer is twice the root.
+- In the family test, 100% of exact one-decimal sums answered ±0.01 off are green, and 51% of `2x=odd`
+  answers that are 0.1 off are green.
+- **Fix:** when the exact root is a terminating decimal with no more digits than the student wrote, require
+  an exact match. Treat the tolerance as rounding, not proximity: the written value must equal the root
+  rounded to the written precision (`|x − r| ≤ ½` unit), not any value within 1 unit.
+
+**R2-G-2: wrong rounding passes.** `3x=7 ;; x=2.34`, `x=56/6 ;; x=9.34` and `x=1/3000 ;; x=0.0004` are `ok`.
+Truncations such as `x=2/3 ;; x=0.66` and `6x=1 ;; x=0.16` are `ok` too. In the family test, 31% of
+answers rounded up by one unit get a green tick.
+
+**R2-G-3: calculator in the wrong mode gets a green tick.** `sin(30)=-0.99`, `tan(45)=1.62`,
+`sin(180)=-0.80` and `sin(1)≈0.017` are all `ok`. A line passes if it is right in either radians or degrees.
+A degree/radian mix-up is the most common trig error in school. These lines should be `unsure` with a
+"calculator mode?" hint.
+
+**R2-G-4: the bar-less annotation reading rescues genuinely wrong lines, and only when there is a space.**
+
+| Line | Verdict | What the student wrote |
+|---|---|---|
+| `2x=8 ;; x=4 -1` | `ok` | x = 3 |
+| `2x+3=7 ;; 2x=4 +3` | `ok` | a sign error |
+| `3x=9 ;; x=3 ·2` | `ok` | x = 6 |
+| `2x+1=9 ;; 2x=8 /2 ;; x=2` | `ok` on every line | a wrong chain |
+
+The same lines without the space are red. The recogniser's spacing is not evidence. A reading that relies
+on the annotation should be at most `unsure` when the literal reading is wrong, and never `ok`.
+
+## Recall lost (to `unsure` or `none`)
+
+- **Exact answers off by more than one unit, now `unsure`.** `2x=5 ;; x=2.4`, `2x+3=7 ;; x=2.1`,
+  `x+1.5=4 ;; x=2.4`, `x=10/4 ;; x=2.6` and `x^2=0.01 ;; x=0.2`. Before the tolerance rule, these were red.
+- **Wrong rounding with `≈` is never checked.** `3x=7 ;; x≈3` is `none`.
+- **A plain final answer ends the chain, so consequences are not checked.** `x+1=3 ;; x=2 ;; x^2=5`,
+  `x=2 ;; y=x+1 ;; y=4` and `x=4 ;; 2x=9` are `none`, although `2x+3=7 ;; x=2 ;; 4x+6=14` is `ok`. The
+  checker can see that a line follows from x=2, but stays silent when it does not. Wrong second roots
+  (`(x-2)(x+3)=0 ;; x=2 ;; x=3`) are still caught.
+- **Derivative definitions and higher orders.** `f(x)=x^2 ;; g(x)=f'(x) ;; g(x)=x` and
+  `s(t)=t^3 ;; s'(t)=3t^2 ;; s''(t)=6` are `none`.
+- **Percent and dropped-`^` alternates did not hide real errors.** `50+20%=70`, `23=6`, `42=8` and
+  `x=3 ;; 32=6` stay red.
+
+## Wrong live results (`evaluate`)
+
+| Id | Input | Shown | Problem |
+|---|---|---|---|
+| R2-L-1 | `x=30 ;; sin(x)=`, `sin(2·15)=` | -0.988 | `sin(30)=` shows 0.5. The degree reading depends on how the 30 was written |
+| R2-L-2 | `sin(7)+sin(6)=` | -0.1575 | 7 is read in degrees and 6 in radians, then the two are added |
+| R2-L-3 | `sin(7.5)=` | 0.938 (radians) | `sin(7)=` gives 0.122 (degrees), so there is a jump |
+| R2-L-4 | `asin(0.5)=` | 0.5236 | radians, while `sin(30)=` is degrees on the same page |
+| R2-L-5 | `sin(180)=` | 1.224647e-16 | should be 0 |
+| R2-L-6 | `50+20%=` | 50.2 | `checkSteps` lets `50+20%=60` through as `unsure` |
+
+All round-1 live findings are fixed: `sin^-1(1)=`, `tan(π/2)=`, `e=5 ;; e+1=`, `log10(1000)=` and
+`x=1,5 ;; 2x=`.
+
+## What held up in round 2
+
+- **Derivative resolution** from `f(x)=` and `y=` lines handles all of these correctly, and catches each
+  wrong version: product and chain rule, quotient rule, redefinitions of `y` and `f`, a derivative of the
+  wrong function, `y''` and `y'''`, `f'(2)`, and unicode primes (`′`, `’`, `´`).
+- **Implicit differentiation** comes back `none`, never red.
+- **The degree reading** of whole-number arguments, and degree answers to `sin(x)=…`, are consistent within
+  `checkSteps`.
+- **Wrong second roots and failing substitution checks** after a final answer are still red.
+
+## Round-2 ranking
+
+1. **R2-G-1 and R2-G-4** (P0 for trust): green ticks on wrong arithmetic and on wrong lines rescued by the
+   annotation reading. A green tick on a mistake teaches the mistake.
+2. **R2-FP-1 to R2-FP-3** (P0): roundings to a whole number, to significant figures and in scientific
+   notation are red. These are common in physics and finance homework.
+3. **R2-FP-4 and R2-FP-5** (P0): degree values through a defined function, and named derivatives (`a=v'`).
+4. **R2-G-3** (wrong mode gets a green tick) and **R2-L-1 to R2-L-4** (inconsistent degree and radian live
+   values).
+5. **Recall regressions** from the tolerance rule and from the chain-ending rule.

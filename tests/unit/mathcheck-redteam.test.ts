@@ -12,7 +12,7 @@
 //  - FAMILIES: seeded generated families (deterministic); families that currently produce false reds are `todo`.
 // Line syntax inside a block: lines are separated by ' ;; '. A line may end in `@0.85` (confidence) and/or
 // `{{alt::p||alt2::p}}` (recogniser alternates with probabilities).
-import { test } from 'node:test';
+import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkSteps, evaluate, variant } from '../../src/renderer/live/math/index.ts';
 import type { LineRecognition } from '../../src/renderer/live/contract.ts';
@@ -425,4 +425,182 @@ test('red-team size: >= 300 adversarial cases', () => {
   const n = Object.values(SOUND).reduce((a, b) => a + b.length, 0) + FALSE_POSITIVES.length + AMBIGUOUS.length +
     WRONG_CAUGHT.length + RECALL_MISSES.length + WRONG_GREEN.length + LIVE_OK.length + LIVE_WRONG.length + VARIANT_SHAPE.length;
   assert.ok(n >= 300, String(n));
+});
+
+// ==== ROUND 2: attacks on the heuristics added by the round-1 fixes ================================
+// Rounding tolerance ("a root within one unit of the last digit"), degree reading of whole-number trig
+// arguments, derivative resolution from f(x)=/y= lines, "a plain final answer ends a chain",
+// bar-less annotations as an alternative reading, and percent / dropped-^ alternates.
+// Hard assertions hold today (regression guards); `todo` tests are open findings (R2-…, see math-redteam.md).
+
+const isGreen = (b: string) => { const v = verdicts(b); return v[v.length - 1] === 'ok'; };
+
+describe('round 2', () => {
+  const SOUND2: string[] = [
+    // rounding that is accepted
+    '3x=7 ;; x=2.3', '3x=7 ;; x=2,33', '3x=7 ;; x=2,3', '3x=7 ;; x=2.333', '3x=7 ;; x=2.3333', '6x=1 ;; x=0.17',
+    '6x=1 ;; x=0.2', 'x=1/3000 ;; x=0.00033', 'x=1/3000 ;; x=0.0003', 'x=2/3 ;; x=0.7', 'x=2/3 ;; x=0.67',
+    'x=6.02·10^23/2 ;; x=3.01·10^23', 'K=1000·1.05^3 ;; K=1157.6', 'K=1000·1.05^3 ;; K=1157.63', 'A=π·10^2 ;; A=314.2',
+    'x=12345/7 ;; x=1763.6', 'x^2=200 ;; x=±14.1', 'x^2=200 ;; x≈14', 'K=1000·1.05^3 ;; K≈1158', '2x+3=7 ;; x=2.0',
+    '2x+3=7 ;; x=2.00', '100x=1 ;; x=0.01', 'x=5/8 ;; x=0.63', 'x=99·1.1 ;; x=108.9', '3x=-7 ;; x=-2.33',
+    'x^2=2 ;; x=1.41 ;; 2x=2.82', '3x=7 ;; x=2.33 ;; 3x=6.99', '3x=7 ;; x=2.33 ;; x+1=3.33', '2x=4.2 ;; x=2.1',
+    'sin(x)=0.1 ;; x=5.74', 'sin(x)=0.9 ;; x=64.2', 'sin(x)=0.9 ;; x=1.12', 'cos(x)=0.5 ;; x=1.05',
+    // degree reading
+    'sin(30)=0.5', 'cos(60)=0.5', 'tan(45)=1', 'sin(180)=0', 'sin(360)=0', 'cos(180)=-1', 'sin(30)+cos(60)=1',
+    '2sin(30)=1', 'sin(30)^2+cos(30)^2=1', 'sin(x)=0.5 ;; x=30', 'sin(x)=0.5 ;; x=150', 'sin(x)=0.5 ;; x=30 or x=150',
+    'sin(x)=0.5 ;; x=0.52', 'cos(x)=0.5 ;; x=60', 'tan(x)=1 ;; x=45', 'tan(x)=1 ;; x=225', 'sin(x)=1 ;; x=90',
+    'sin(x)=0 ;; x=180', '2sin(x)=1 ;; sin(x)=0.5 ;; x=30', 'f(x)=sin(x) ;; f(10)=-0.544', 'f(x)=sin(x) ;; f(π/6)=0.5',
+    'sin(20)·2=0.68', 'sin(20)=0.34 ;; 2sin(20)=0.68', 'sin(10)+sin(20)=0.52', 'sin(7)·sin(7)+cos(7)·cos(7)=1',
+    'sin(10)/cos(10)=tan(10)', 'sin(2·5)=sin(10)', 'sin(2·15)=0.5', 'sin(60/2)=0.5', 'asin(0.5)=30', 'asin(0.5)=0.52',
+    'acos(0)=90', 'atan(1)=45', 'atan(1)=0.785', 'asin(1)=90', 'asin(1)=1.57', 'sin^-1(0.5)=30', 'h=10·sin(30) ;; h=5',
+    'h=10·sin(30)=5', 'x=30 ;; sin(x)=0.5', 'y=sin(x) ;; x=30 ;; y=0.5', 'sin(10)≈-0.544', 'sin(10)≈0.174',
+    // derivative resolution
+    "y=x^2 ;; y'=2x ;; y''=2", "y=x^3 ;; y'=3x^2 ;; y''=6x ;; y'''=6", "y=x^2·sin(x) ;; y'=2x·sin(x)+x^2·cos(x)",
+    "y=sin(x^2) ;; y'=2x·cos(x^2)", "y=(3x+1)^5 ;; y'=15(3x+1)^4", "y=e^(3x) ;; y'=3e^(3x)", "y=ln(2x) ;; y'=1/x",
+    "y=x/(x+1) ;; y'=1/(x+1)^2", "f(x)=x^2 ;; g(x)=x^3 ;; f'(x)=2x", "f(x)=x^2 ;; g(x)=x^3 ;; g'(x)=3x^2",
+    "f(x)=x^2 ;; f(x)=x^3 ;; f'(x)=3x^2", "y=x^2 ;; y=x^3 ;; y'=3x^2", "y=x^2 ;; y'=2x ;; y=x^3 ;; y'=3x^2",
+    "f(x)=x^2 ;; f'(x)=2x ;; g(x)=sin(x) ;; g'(x)=cos(x)", "y=3x+2 ;; x=4 ;; y'=3", "x^2+y^2=25 ;; 2x+2yy'=0 ;; y'=-x/y",
+    "x^2+y^2=25 ;; y'=-x/y", "xy=1 ;; y'=-y/x", "y^2=x ;; 2yy'=1 ;; y'=1/(2y)", "y=x^2 ;; dy/dx=2x ;; d^2y/dx^2=2",
+    "s(t)=t^3 ;; s'(t)=3t^2 ;; s''(t)=6t", "s=t^3 ;; s'=3t^2", "f(x)=x^3 ;; f'(x)=3x^2 ;; f'(x)=0 ;; x=0",
+    "f(x)=x^3 ;; f'(x)=3x^2 ;; f''(x)=6x ;; f''(0)=0", "f(x)=x^3 ;; f''(x)=6x", "f(x)=ax^2 ;; f'(x)=2ax",
+    "f(x)=ax^2+bx+c ;; f'(x)=2ax+b", "f(t)=t^2 ;; f'(t)=2t", "f(x)=x^2 ;; f'(a)=2a", "f(x)=x^2 ;; f'(x)=2x ;; f'(x)=4 ;; x=2",
+    "y=x^2 ;; y′=2x", "y=x^2 ;; y’=2x", "y=x^2 ;; y´=2x", "f(x)=x^2 ;; f´(x)=2x", "f(x)=x^2 ;; f′(x)=2x", "f(x)=x^2 ;; f ' (x)=2x",
+    "f(x)=x^2 ;; f''(x)=2", "f(x)=x^2 ;; f′′(x)=2", "f(x)=x^2 ;; m=f'(1)=2", "y=x^2 ;; m=y'(1)=2", "u=x^2 ;; v=sin(x) ;; u'=2x ;; v'=cos(x)",
+    "v(t)=3t^2 ;; a(t)=v'(t)=6t", "s(t)=5t^2 ;; v=s' ;; v=10t", "f(x)=x^3 ;; f'(x)=3x^2 ;; m=f'(2)=12", "y=Ce^x ;; y'=Ce^x",
+    "y'=y", "f'(x)=f(x)", "y'=2x ;; y=x^2+C", "x=t^2 ;; x'=2t", "y=x^2+1 ;; y(2)=5 ;; y'=2x",
+    // a final answer ends a chain; new problems after it
+    'x+1=3 ;; x=2 ;; 2x+5=7 ;; x=1', '2x+3=7 ;; x=2 ;; 4x+6=14', 'x+1=3 ;; x=2 ;; 2x+3=8 ;; 2x=5 ;; x=2.5',
+    // annotations and percent
+    '2x=8 /2 ;; x=4', '4x=12 :4 ;; x=3', 'x-3=4 +3 ;; x=7', '5x=20 ;; x=4 (·5)', '5x=20 ;; x=4 | ·5', 'x/2=5 ;; x=5·2',
+    '2x+1=9 ;; 2x=8 :2', '3+4=7 :7', '3·4=12 /3', '50+20%=60', '100-10%=90', '100+10%=110', '200·5%=10', '20%·50=10',
+    '50+20%=50.2', '23=8', '32=9', '25=32', '24=16', '33=27', '34=81', '52=25', '42=16', '26=64', 'x=3 ;; 32=9',
+  ];
+  test(`sound: ${SOUND2.length} correct blocks, no red`, () => {
+    const bad = SOUND2.filter((b) => reds(b).length).map((b) => `${b} -> ${verdicts(b).join(',')}`);
+    assert.deepEqual(bad, []);
+  });
+
+  const CAUGHT2: string[] = [
+    '3x=7 ;; x=2.32', '3x=7 ;; x=2.35', '3x=7 ;; x=-2.33', '3x=-7 ;; x=2.33', '3x=7 ;; x=2', '3x=7 ;; x=3', '3x=7 ;; x=2.5',
+    '3x=7 ;; x=2.332', 'x^2=2 ;; x=1', 'x^2=2 ;; x=2', '2x=5 ;; x=3', '2x=5 ;; x=2', '100x=1 ;; x=0.0', 'x/7=1000 ;; x=7010',
+    'x+0.5=0 ;; x=0.5', 'x^2-5x+6=0 ;; x=2.1 or x=3', 'x^2-5x+6=0 ;; x=2 or x=3.1', '6x=1 ;; x=0.18', 'x=1/3000 ;; x=0.0005',
+    'x=2/3 ;; x=0.68', 'x=12.5·4 ;; x=51', 'x=12.5·4 ;; x=49', 'x=10/4 ;; x=3', 'sin(x)=0.5 ;; x=60', 'sin(x)=0.5 ;; x=6',
+    'sin(x)=1 ;; x=270', 'sin(x)=0 ;; x=7', 'cos(x)=0.5 ;; x=30', 'tan(x)=1 ;; x=46', "y=x^2 ;; y'=3x", "y=x^2 ;; y'=x",
+    "y=x^2 ;; y'=2x ;; y''=2x", "y=x^3 ;; y'=3x^2 ;; y''=3x", "y=x^2·sin(x) ;; y'=2x·cos(x)", "y=sin(x^2) ;; y'=cos(x^2)",
+    "y=sin(x^2) ;; y'=cos(2x)", "y=(3x+1)^5 ;; y'=5(3x+1)^4", "y=e^(3x) ;; y'=e^(3x)", "y=ln(2x) ;; y'=2/x",
+    "y=x/(x+1) ;; y'=1/(x+1)", "f(x)=x^2 ;; g(x)=x^3 ;; g'(x)=2x", "f(x)=x^2 ;; g(x)=x^3 ;; f'(x)=3x^2",
+    "f(x)=x^2 ;; f(x)=x^3 ;; f'(x)=2x", "y=x^2 ;; y=x^3 ;; y'=2x", "y=x^2 ;; y'=2x ;; y=x^3 ;; y'=2x",
+    "f(x)=x^2 ;; f'(x)=2x ;; g(x)=sin(x) ;; f'(x)=cos(x)", "y=x^2 ;; dy/dx=x", "s=t^3 ;; s'=3t",
+    "f(x)=x^3 ;; f'(x)=3x^2 ;; f'(x)=0 ;; x=1", "f(x)=x^3 ;; f'(x)=3x^2 ;; f'(2)=6", "f(x)=x^3 ;; f'(x)=3x^2 ;; f''(x)=6x ;; f''(1)=3",
+    "f(x)=x^3 ;; f'(x)=2x^2", "f(x)=x^3 ;; f''(x)=3x^2", "f(x)=ax^2 ;; f'(x)=ax", "u=x^2 ;; v=sin(x) ;; u'=2x ;; v'=-cos(x)",
+    '(x-2)(x+3)=0 ;; x=2 ;; x=3', '(x-2)(x+3)=0 ;; x-2=0 ;; x=2 ;; x+3=0 ;; x=3', 'x^2-5x+6=0 ;; (x-2)(x-3)=0 ;; x=2 ;; x=4',
+    '2x+3=7 ;; x=2 ;; 2·2+3=8', 'x+1=3 ;; x=2 ;; 2x+3=9 ;; 2x=5 ;; x=2.5', 'x+1=3 ;; x=2 ;; 2x+3=9 ;; 2x=6 ;; x=4',
+    '4x=12 :4 ;; x=4', '4x=12 :4 ;; x=8', '4x=12 /4 ;; x=48', '2x=8 /2 ;; x=16', 'x-3=4 +3 ;; x=1', '3x=9 ;; x=3·2',
+    '2x+3=7 ;; 2x=4+3', 'x/2=5 ;; x=10·2', '50+20%=70', '50+20%=52', '100-10%=110', '100+10%=101', '200·5%=1000',
+    '20%·50=100', '23=6', '52=10', '42=8', 'x=3 ;; 32=6', '2^3=6', '23=9', '34=12', '26=12',
+  ];
+  test(`caught: ${CAUGHT2.length} wrong blocks are red`, () => {
+    assert.deepEqual(CAUGHT2.filter((b) => !reds(b).length), []);
+  });
+
+  // P0: correct work marked red by the new rules
+  const FP2: [string, string][] = [
+    ['R2-FP-1', 'K=1000·1.05^3 ;; K=1158'], ['R2-FP-1', 'x=1000·1.05^3 ;; x=1158'], ['R2-FP-1', 'A=π·10^2 ;; A=314'],
+    ['R2-FP-1', 'A=π·5^2 ;; A=79'], ['R2-FP-1', 'x=12345/7 ;; x=1764'], ['R2-FP-1', 'x=393/10 ;; x=39'], ['R2-FP-1', 'x=687/7 ;; x=98'],
+    ['R2-FP-1', 'x^2=20000 ;; x=141'], ['R2-FP-1', 'x^2=200 ;; x=14'],
+    ['R2-FP-2', 'x=12345/7 ;; x=1760'], ['R2-FP-2', 'x=1518/5 ;; x=304'], ['R2-FP-2', 'x=17154/8 ;; x=2140'], ['R2-FP-2', 'A=π·10^2 ;; A=310'],
+    ['R2-FP-3', 'x=1/3000 ;; x=3.3·10^-4'], ['R2-FP-3', 'x=6.02·10^23/3 ;; x=2.01·10^23'], ['R2-FP-3', 'x=6.02·10^23/3 ;; x=2.0·10^23'],
+    ['R2-FP-3', 'x=2/3000 ;; x=6.7·10^-4'], ['R2-FP-3', 'x=1/13000 ;; x=7.7·10^-5'],
+    ['R2-FP-4', 'f(x)=sin(x) ;; f(30)=0.5'], ['R2-FP-4', 'f(x)=cos(x) ;; f(60)=0.5'], ['R2-FP-4', 'f(x)=2sin(x) ;; f(30)=1'],
+    ['R2-FP-4', 'g(α)=sin(α) ;; g(30)=0.5'],
+    ['R2-FP-5', "v=3t^2 ;; a=v'"], ['R2-FP-5', "v=3t^2 ;; a=v'=6t"], ['R2-FP-5', "y=2x+3 ;; m=y'=2"], ['R2-FP-5', "y=x^2 ;; k=y'"],
+  ];
+  for (const [id, b] of FP2) {
+    test(`${id} false red: ${b}`, { todo: `${id} (math-redteam.md round 2)` }, () => assert.deepEqual(reds(b), [], verdicts(b).join(',')));
+  }
+
+  // wrong work that the new rules tick green (worse than silence: it confirms the mistake)
+  const GREEN2: [string, string][] = [
+    ['R2-G-1', 'x=0.1+0.2 ;; x=0.31'], ['R2-G-1', 'x=0.1+0.2 ;; x=0.29'], ['R2-G-1', 'x=7.1+0.1 ;; x=7.19'], ['R2-G-1', 'x=8.8+8.2 ;; x=16.99'],
+    ['R2-G-1', 'x=99·1.1 ;; x=108.8'], ['R2-G-1', '100x=1 ;; x=0.02'], ['R2-G-1', 'x^2=0.0001 ;; x=0.02'], ['R2-G-1', '2x+3=7 ;; x=1.99'],
+    ['R2-G-1', '5x=1 ;; x=0.21'], ['R2-G-1', 'x-0.25=1 ;; x=1.26'], ['R2-G-1', 'x-0.25=1 ;; x=1.24'], ['R2-G-1', '4x=5 ;; x=1.24'],
+    ['R2-G-1', '4x=5 ;; x=1.26'],
+    ['R2-G-2', '3x=7 ;; x=2.34'], ['R2-G-2', '3x=7 ;; x=2.334'], ['R2-G-2', '3x=-7 ;; x=-2.34'], ['R2-G-2', 'x=412/13 ;; x=31.70'],
+    ['R2-G-2', 'x=56/6 ;; x=9.34'], ['R2-G-2', 'x=1/3000 ;; x=0.0004'], ['R2-G-2', '6x=1 ;; x=0.16'], ['R2-G-2', 'x=2/3 ;; x=0.66'],
+    ['R2-G-3', 'sin(30)=-0.99'], ['R2-G-3', 'tan(45)=1.62'], ['R2-G-3', 'sin(180)=-0.80'], ['R2-G-3', 'sin(10)=-0.54'],
+    ['R2-G-3', 'sin(7)≈0.657'], ['R2-G-3', 'sin(1)≈0.017'],
+    ['R2-G-4', '2x=8 ;; x=4 -1'], ['R2-G-4', '3x=9 ;; x=3 ·2'], ['R2-G-4', '2x+3=7 ;; 2x=4 +3'], ['R2-G-4', '2x+3=7 ;; 2x=4 /2'],
+    ['R2-G-4', 'x/2=5 ;; x=10 ·2'], ['R2-G-4', 'x+3=7 ;; x=4 -3'], ['R2-G-4', '2x=8 ;; x=4 +1'], ['R2-G-4', '3x=9 ;; x=3 :3'],
+    ['R2-G-4', '2x+1=9 ;; 2x=8 /2 ;; x=2'], ['R2-G-4', 'x+3=7 :2 ;; x=4'],
+  ];
+  for (const [id, b] of GREEN2) {
+    test(`${id} green on wrong work: ${b}`, { todo: `${id} (math-redteam.md round 2)` }, () => assert.ok(!isGreen(b), verdicts(b).join(',')));
+  }
+
+  // recall lost to 'unsure' / 'none'
+  const MISS2 = [
+    '2x=5 ;; x=2.4', '2x=5 ;; x=2.6', '2x+3=7 ;; x=2.1', '2x+3=7 ;; x=1.9', '2x=4.2 ;; x=2.2', 'x+1.5=4 ;; x=2.4',
+    'x=1.5·2 ;; x=3.1', 'x=10/4 ;; x=2.6', 'x^2=0.01 ;; x=0.2', 'x^2=0.25 ;; x=0.6', 'x^2=6.25 ;; x=2.6', '5x=1 ;; x=0.3',
+    'x+0.5=0 ;; x=-0.4', 'x^2=2 ;; x=±1.5', '3x=7 ;; x≈2.4', '3x=7 ;; x≈3', 'x+1=3 ;; x=2 ;; x^2=5', 'x+1=3 ;; x=2 ;; 2x=5',
+    'x=2 ;; y=x+1 ;; y=4', 'x=2 ;; y=3x ;; y=5', 'x=4 ;; 2x=9', "f(x)=x^2 ;; g(x)=f'(x) ;; g(x)=x", "s(t)=t^3 ;; s'(t)=3t^2 ;; s''(t)=6",
+    'x+3=7 ;; x=7 -3 ;; x=10',
+  ];
+  for (const b of MISS2) {
+    test(`R2 recall miss: ${b}`, { todo: 'R2-M (math-redteam.md round 2)' }, () => assert.ok(reds(b).length > 0, verdicts(b).join(',')));
+  }
+
+  // spacing alone flips the verdict: the recogniser's spaces are not evidence
+  test('R2-G-4 spacing invariance: "x=4 -1" and "x=4-1" get the same verdict', { todo: 'R2-G-4' }, () => {
+    for (const [a, b] of [['2x=8 ;; x=4 -1', '2x=8 ;; x=4-1'], ['3x=9 ;; x=3 ·2', '3x=9 ;; x=3·2'], ['2x+3=7 ;; 2x=4 +3', '2x+3=7 ;; 2x=4+3']]) {
+      assert.deepEqual(verdicts(a), verdicts(b), `${a} vs ${b}`);
+    }
+  });
+
+  // live results
+  const LIVE2_OK: [string, string[]][] = [
+    ['sin(30)=', ['0.5']], ['sin(10)=', ['0.1736481777']], ['cos(60)=', ['0.5']], ['tan(45)=', ['1']], ['tan(90)=', []],
+    ['sin(-30)=', ['-0.5']], ['sin 30=', ['0.5']], ['sin(30)·2=', ['1']], ['1/sin(30)=', ['2']], ['sin^-1(1)=', ['1.570796327']],
+    ['tan(π/2)=', []], ['e=5 ;; e+1=', ['6']], ['log10(1000)=', ['3']], ['x=1,5 ;; 2x=', ['3']], ['sin(π/6)=', ['0.5']],
+  ];
+  test(`live: ${LIVE2_OK.length} inputs`, () => { for (const [b, w] of LIVE2_OK) assert.deepEqual(ev(b), w, b); });
+  const LIVE2_BAD: [string, string, (v: string[]) => boolean][] = [
+    ['R2-L-1', 'x=30 ;; sin(x)=', (v) => v[0] === '0.5'], // -0.988 though sin(30)= shows 0.5
+    ['R2-L-1', 'sin(2·15)=', (v) => v[0] === '0.5'], // -0.988
+    ['R2-L-1', 'sin(15+15)=', (v) => v[0] === '0.5'],
+    ['R2-L-2', 'sin(7)+sin(6)=', (v) => v[0] !== '-0.1575461548'], // 7 read in degrees, 6 in radians, then added
+    ['R2-L-3', 'sin(7.5)=', (v) => Math.abs(Number(v[0]) - Math.sin((7.5 * Math.PI) / 180)) < 1e-6], // 0.938 (radians) next to sin(7)=0.122 (degrees)
+    ['R2-L-4', 'asin(0.5)=', (v) => v[0] === '30'], // radians, while sin(30)= is degrees
+    ['R2-L-5', 'sin(180)=', (v) => v[0] === '0'], // 1.224647e-16
+    ['R2-L-6', '50+20%=', (v) => v[0] !== '50.2'], // checkSteps lets 50+20%=60 through as unsure, the live value is 50.2
+  ];
+  for (const [id, b, ok] of LIVE2_BAD) {
+    test(`${id} live: ${b}`, { todo: `${id} (math-redteam.md round 2)` }, () => assert.ok(ok(ev(b)), ev(b).join(',')));
+  }
+
+  // generated families (seeded)
+  const R2 = lcg(11);
+  const r2i = (a: number, b: number) => a + Math.floor(R2() * (b - a + 1));
+  const FAM2: { name: string; todo?: string; expect: 'noRed' | 'notGreen'; gen: () => string }[] = [
+    { name: 'p/q rounded to 1 dp', expect: 'noRed', gen: () => { const q = r2i(3, 13), p = r2i(2, 999); return `x=${p}/${q} ;; x=${(p / q).toFixed(1)}`; } },
+    { name: 'p/q rounded to 2 dp', expect: 'noRed', gen: () => { const q = r2i(3, 13), p = r2i(2, 999); return `x=${p}/${q} ;; x=${(p / q).toFixed(2)}`; } },
+    { name: 'p/q rounded to 3 dp', expect: 'noRed', gen: () => { const q = r2i(3, 13), p = r2i(2, 999); return `x=${p}/${q} ;; x=${(p / q).toFixed(3)}`; } },
+    { name: 'sqrt n to 2 dp, both roots', expect: 'noRed', gen: () => { const n = r2i(2, 500); return `x^2=${n} ;; x=${Math.sqrt(n).toFixed(2)} or x=${(-Math.sqrt(n)).toFixed(2)}`; } },
+    { name: 'p/q rounded to a whole number', todo: 'R2-FP-1', expect: 'noRed', gen: () => { const q = r2i(3, 13), p = r2i(20, 999); return `x=${p}/${q} ;; x=${Math.round(p / q)}`; } },
+    { name: 'p/q to 3 significant figures', todo: 'R2-FP-2', expect: 'noRed', gen: () => { const q = r2i(3, 13), p = r2i(1000, 99999); return `x=${p}/${q} ;; x=${Number((p / q).toPrecision(3))}`; } },
+    { name: 'scientific notation, 2 s.f.', todo: 'R2-FP-3', expect: 'noRed', gen: () => { const q = r2i(3, 13), p = r2i(1, 9); const [m, e] = (p / q / 1000).toExponential(1).split('e'); return `x=${p}/${q * 1000} ;; x=${m}·10^${Number(e)}`; } },
+    { name: 'exact decimal sum, answer off by 0.01', todo: 'R2-G-1', expect: 'notGreen', gen: () => { const a = r2i(1, 99), b = r2i(1, 99); return `x=${a / 10}+${b / 10} ;; x=${((a + b) / 10 + (R2() < 0.5 ? 0.01 : -0.01)).toFixed(2)}`; } },
+    { name: '2x=odd, answer off by 0.1', todo: 'R2-G-1', expect: 'notGreen', gen: () => { const b = r2i(1, 40) * 2 + 1; return `2x=${b} ;; x=${(b / 2 + (R2() < 0.5 ? 0.1 : -0.1)).toFixed(1)}`; } },
+  ];
+  for (const fam of FAM2) {
+    const blocks = Array.from({ length: 150 }, fam.gen);
+    test(`family: ${fam.name} (150 blocks)`, fam.todo ? { todo: fam.todo } : {}, () => {
+      const bad = blocks.filter((b) => (fam.expect === 'noRed' ? reds(b).length > 0 : isGreen(b)));
+      assert.deepEqual(bad.slice(0, 5), [], `${bad.length}/150`);
+    });
+  }
+
+  test('round-2 size: >= 150 new cases', () => {
+    const n = SOUND2.length + CAUGHT2.length + FP2.length + GREEN2.length + MISS2.length + LIVE2_OK.length + LIVE2_BAD.length;
+    assert.ok(n >= 150, String(n));
+  });
 });
