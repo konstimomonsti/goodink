@@ -97,20 +97,20 @@ test('fuzz: generated wrong steps are caught (>= 90%) and never on the wrong lin
   assert.ok(caught / n >= 0.9, `recall ${caught}/${n}`);
 });
 
-test('latency: a 10-line block checks in < 5 ms', () => {
+test('latency: a 10-line block checks in < 5 ms (median, robust to parallel test load)', () => {
   const blocks = [
     ['3(2x-1)=4x+7', '6x-3=4x+7', '6x-4x=7+3', '2x=10', 'x=5', '3(2·5-1)=27', '4·5+7=27', 'x^2-5x+6=0', '(x-2)(x-3)=0', 'x=2 or x=3'],
     ['(x+1)^2', '=x^2+2x+1', '7×8=56', '1/2+1/3=5/6', 'd/dx(x^3)=3x^2', '2x+3=7', '2x=4', 'x=2', 'sin(x)^2+cos(x)^2=1', '√(16)=4'],
     ['2x+3=7', '2x=10', 'x=5', '4x-8=12', '4x=20', 'x=5', '(a+b)^2=a^2+b^2', '-2x<4', 'x<-2', '7×8=54'],
   ];
-  for (const b of blocks) run(b); // warm up the JIT
+  for (let i = 0; i < 5; i++) for (const b of blocks) run(b); // warm up the JIT
   for (const b of blocks) {
-    const t0 = performance.now();
-    const reps = 20;
-    for (let i = 0; i < reps; i++) run(b);
-    const ms = (performance.now() - t0) / reps;
-    console.log(`latency ${ms.toFixed(2)} ms: ${b[0]} …`);
-    assert.ok(ms < 5, `${ms.toFixed(2)} ms for ${JSON.stringify(b)}`);
+    const times: number[] = [];
+    for (let i = 0; i < 25; i++) { const t0 = performance.now(); run(b); times.push(performance.now() - t0); }
+    times.sort((x, y) => x - y);
+    const median = times[times.length >> 1];
+    console.log(`latency median ${median.toFixed(2)} ms: ${b[0]} …`);
+    assert.ok(median < 5, `${median.toFixed(2)} ms for ${JSON.stringify(b)}`);
   }
 });
 

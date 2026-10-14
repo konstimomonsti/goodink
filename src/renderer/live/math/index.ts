@@ -114,7 +114,7 @@ export interface Node {
 type RelOp = '=' | '<' | '>' | '<=' | '>=' | '!=' | '~';
 interface Rel { parts: Node[]; ops: RelOp[]; opSpans: [number, number][] }
 interface Stmt { rels: Rel[]; lead: RelOp | null }
-interface Parsed { text: string; segs: Stmt[]; label: boolean }
+interface Parsed { text: string; segs: Stmt[]; label: boolean; note?: 'pct' | 'sup' } // note: a reading that may only yield 'unsure'
 
 const N = (t: Kind, o: Partial<Node> = {}): Node => ({ t, s: -1, e: -1, ...o });
 const num = (q: Rat) => N('num', { q });
@@ -230,6 +230,9 @@ function tokenize(text: string, lo: number, hi: number, commaDecimal: boolean): 
       if (prev.k === 'fn' && prev.v === 'log' && /^\d+$/.test(m[1])) { prev.base = rq(Number(m[1])); prev.e = i + m[0].length; i += m[0].length; continue; }
       return null;
     }
+    if ((m = rest.match(/^d([a-zA-Z])\/d([a-zA-Z])(?![a-zA-Z])/))) {
+      push('id', i, i + m[0].length, m[1] + "'"); i += m[0].length; continue; // dy/dx is y'
+    }
     if ((m = rest.match(/^d\/d([a-zA-Z])(?![a-zA-Z])/))) {
       push('deriv', i, i + m[0].length, m[1]); i += m[0].length; continue;
     }
@@ -257,6 +260,12 @@ function tokenize(text: string, lo: number, hi: number, commaDecimal: boolean): 
       }
       if (run.length >= 4 && singles >= 3) return null; // prose, not maths
       if (kw && singles > 2) return null;
+      // a subscript base flattened by the recogniser: log10(…), log2(…), "log 2(8)"
+      const last = out[out.length - 1];
+      if (last?.k === 'fn' && last.v === 'log' && last.e === j && !last.base) {
+        const mm = text.slice(j, hi).match(/^\s?(\d+)\s*(?=[([])/);
+        if (mm) { last.base = rq(Number(mm[1])); last.e = j + mm[0].length; j += mm[0].length; }
+      }
       i = j; continue;
     }
     if (c === 'π') { push('const', i, i + 1, 'pi'); i++; continue; }
@@ -409,9 +418,16 @@ class Parser {
       case 'const': this.next(); n = N('const', { name: t.v, s: t.s, e: t.e }); break;
       case 'id': {
         this.next();
-        const nx = this.peek(), nx2 = this.peek(1);
+        let name = t.v, end = t.e;
+        while (this.peek()?.k === 'post' && this.peek()!.v === "'") { name += "'"; end = this.next().e; }
+        const nx = this.peek();
+        if (name.endsWith("'")) {
+          // derivative notation, never a product: y', y'', f'(x), f''(2)
+          if (nx?.k === 'lp') { const a = this.group(); n = N('call', { name, a, s: t.s, e: a.e }); break; }
+          n = N('var', { name, s: t.s, e: end });
+          break;
+        }
         if (USER_FNS.has(t.v) && nx?.k === 'lp' && nx.s === t.e) { const a = this.group(); n = N('call', { name: t.v, a, s: t.s, e: a.e }); break; }
-        if (nx?.k === 'post' && nx.v === "'" && nx2?.k === 'lp') { this.next(); const a = this.group(); n = N('call', { name: t.v + "'", a, s: t.s, e: a.e }); break; }
         n = N('var', { name: t.v, s: t.s, e: t.e });
         break;
       }
@@ -490,6 +506,10 @@ class Parser {
     if (nx?.k === 'lp') a = this.group();
     else if (name === 'sqrt' || name === 'root') a = this.prefix();
     else { this.noFnImplicit++; a = this.expr(20); this.noFnImplicit--; }
+    if (powAfter && ['sin', 'cos', 'tan'].includes(name)) {
+      const k = constRat(powAfter);
+      if (k && req(k, rq(-1))) { name = 'a' + name; powAfter = null; } // sin^-1 is arcsin, not 1/sin
+    }
     let n = N('fn', { name, a, b: index, s: t.s, e: a.e });
     if (powAfter) n = N('pow', { a: n, b: powAfter, s: t.s, e: a.e });
     return n;
@@ -498,20 +518,35 @@ class Parser {
 const glyph = (t: Tok) => t.g ?? t.v;
 
 /** strip labels ("a)", "1.", "⇒") and trailing working notes ("| -3", "✓"); returns [lo, hi, labelled] */
-function trimLine(text: string): [number, number, boolean] {
+const ANNOT = /^\|+\s*(?:[+\-−–·×*:÷/^]|√|sqrt|ln|log|exp|\(\s*\)|\d|x\d)/;
+/** a trailing operation note without its bar ("4x=12 :4", "x+3=7 (-3)"), as a recogniser that drops "|" produces */
+const BARLESS = /\s+(?:[:÷/·×*]{1,2}\s*\(?[+\-−]?\d+(?:[.,]\d+)?\)?|[+\-−]\s*\d+(?:[.,]\d+)?|\(\s*[+\-−·:×÷*/]\s*-?\d+(?:[.,]\d+)?\s*\)|\(\s*-\d+(?:[.,]\d+)?\s*\))\s*$/;
+/** strip labels ("a)", "1.", "⇒") and trailing working notes ("| -3 | :2", "✓"); returns [lo, hi, labelled] */
+function trimLine(text: string, barless = false): [number, number, boolean] {
   let lo = 0, hi = text.length, label = false;
   const m = text.match(/^\s*(?:(?:[a-hA-H]|\d{1,2}|[ivx]{1,4})\)\s+|\(\s*(?:[a-h]|\d{1,2})\s*\)\s+|\d{1,2}\.\s+|[⇒→∴]|=>|->)\s*/);
   if (m) { lo = m[0].length; label = !/^[\s⇒→∴=>-]+$/.test(m[0]); }
-  const bars = [...text.matchAll(/\|/g)].map((x) => x.index!);
-  for (let k = bars.length - 1; k >= 0; k--) {
-    if (k % 2 !== 0) continue; // an even number of bars before it: not closing an |abs|
-    if (/^\|\s*(?:[+\-−–·×*:÷/^]|√|sqrt|ln|log|exp|\(\s*\)|\d)/.test(text.slice(bars[k])) && bars.length - k === 1) { hi = bars[k]; break; }
+  const bars = [...text.matchAll(/\|+/g)].map((x) => x.index!);
+  // the first even bar from which every bar segment to the end is an annotation
+  for (let k = 0; k < bars.length; k += 1) {
+    if (k % 2 !== 0 && !/^\|\s*[:÷·×*/+\-−]/.test(text.slice(bars[k]))) continue; // closing an |abs|
+    let all = true;
+    for (let j = k; j < bars.length; j++) if (!ANNOT.test(text.slice(bars[j], bars[j + 1] ?? text.length))) all = false;
+    if (all && text.slice(lo, bars[k]).includes('=')) { hi = bars[k]; break; }
+  }
+  if (barless) {
+    for (let g = 0; g < 3; g++) {
+      const body = text.slice(lo, hi);
+      const mm = body.match(BARLESS);
+      if (!mm || !body.slice(0, mm.index).includes('=') || /=\s*$/.test(body.slice(0, mm.index))) break;
+      hi = lo + mm.index!;
+    }
   }
   return [lo, hi, label];
 }
 
-function parseOne(text: string, commaDecimal: boolean, tight: boolean): Parsed | null {
-  const [lo, hi, label] = trimLine(text);
+function parseOne(text: string, commaDecimal: boolean, tight: boolean, barless = false): Parsed | null {
+  const [lo, hi, label] = trimLine(text, barless);
   const toks = tokenize(text, lo, hi, commaDecimal);
   if (!toks || !toks.length) return null;
   const segs: Stmt[] = [];
@@ -556,6 +591,10 @@ export function parseVariants(text: string): Parsed[] {
     const p = parseOne(text, cd, tight);
     if (p) out.push(p);
   }
+  if (BARLESS.test(text.replace(/[|✓✔\s]+$/, ''))) {
+    const p = parseOne(text, commaOpts[0], false, true);
+    if (p && (!out.length || p.segs.length === out[0].segs.length)) out.push(p);
+  }
   const more: Parsed[] = [];
   for (const p of out) {
     if (anyNode(p, (m) => m.t === 'fn' && m.name === 'log')) {
@@ -565,14 +604,39 @@ export function parseVariants(text: string): Parsed[] {
     } else more.push(p);
   }
   const res: Parsed[] = [];
+  const remap = (p: Parsed, f: (m: Node) => Node | null, note?: Parsed['note']): Parsed => ({ ...p, note, segs: p.segs.map((s) => mapStmt(s, (x) => mapNodes(x, f))) });
   for (const p of more) {
     res.push(p);
+    // degree mode: numeric trig arguments in degrees, inverse trig results in degrees
     const trig = (m: Node) => m.t === 'fn' && ['sin', 'cos', 'tan', 'cot', 'sec', 'csc'].includes(m.name!) && !varsOf(m.a!).size;
-    if (anyNode(p, trig)) {
-      res.push({ ...p, segs: p.segs.map((s) => mapStmt(s, (x) => mapNodes(x, (m) => (trig(m) ? { ...m, a: nmul(m.a!, ndiv(N('const', { name: 'pi' }), num(rq(180)))) } : null)))) });
+    const itrig = (m: Node) => m.t === 'fn' && ['asin', 'acos', 'atan'].includes(m.name!) && !varsOf(m.a!).size;
+    if (anyNode(p, (m) => trig(m) || itrig(m))) {
+      res.push(remap(p, (m) => (trig(m) ? { ...m, a: nmul(m.a!, ndiv(N('const', { name: 'pi' }), num(rq(180)))) } : itrig(m) ? nmul({ ...m }, ndiv(num(rq(180)), N('const', { name: 'pi' }))) : null)));
     }
   }
-  return res.slice(0, 6);
+  const base = res[0];
+  if (base) {
+    // "e" used as a variable (an edge, a misread c) unless it is clearly Euler's number
+    let eConst = false, euler = false;
+    for (const st of base.segs) for (const r of st.rels) for (const x of r.parts) walk(x, (m, parent) => {
+      if (m.t !== 'const' || m.name !== 'e') return;
+      eConst = true;
+      if (parent && ((parent.t === 'pow' && parent.a === m) || (parent.t === 'fn' && ['ln', 'log', 'log10', 'logb'].includes(parent.name!)))) euler = true;
+    });
+    if (eConst && !euler && !/[≈~]/.test(text)) res.push(remap(base, (m) => (m.t === 'const' && m.name === 'e' ? { ...m, t: 'var' } : null)));
+    // calculator percent: a ± p% means a·(1 ± p/100)
+    if (anyNode(base, (m) => isSum(m) && m.b!.t === 'fn' && m.b!.name === 'pct')) {
+      res.push(remap(base, (m) => (isSum(m) && m.b!.t === 'fn' && m.b!.name === 'pct' ? { ...m, b: nmul(mapNodes(m.a!, () => null), m.b!) } : null), 'pct'));
+    }
+    // a dropped superscript on a pure-number line: "23=8" may be 2^3 = 8
+    if (/^\s*\d{2,3}\s*=\s*\d{1,3}\s*$/.test(text)) {
+      const lit = base.segs[0].rels[0].parts[0];
+      const t = lit.txt ?? '';
+      const splits = t.length === 2 ? [[t[0], t[1]]] : [[t[0], t.slice(1)], [t.slice(0, 2), t[2]]];
+      for (const [a, b] of splits) res.push(remap(base, (m) => (m === lit ? npow(num(rq(Number(a))), num(rq(Number(b)))) : null), 'sup'));
+    }
+  }
+  return res.slice(0, 8);
 }
 
 // ---- evaluation -----------------------------------------------------------------------------------
@@ -643,8 +707,11 @@ function cf0(n: Node): FF {
   }
 }
 const FLOAT_FN: Record<string, (x: number) => number> = {
-  sin: Math.sin, cos: Math.cos, tan: Math.tan,
-  cot: (x) => 1 / Math.tan(x), sec: (x) => 1 / Math.cos(x), csc: (x) => 1 / Math.sin(x),
+  sin: Math.sin, cos: Math.cos,
+  tan: (x) => { const c = Math.cos(x); return Math.abs(c) < 1e-12 ? NaN : Math.sin(x) / c; },
+  cot: (x) => { const s = Math.sin(x); return Math.abs(s) < 1e-12 ? NaN : Math.cos(x) / s; },
+  sec: (x) => { const c = Math.cos(x); return Math.abs(c) < 1e-12 ? NaN : 1 / c; },
+  csc: (x) => { const s = Math.sin(x); return Math.abs(s) < 1e-12 ? NaN : 1 / s; },
   asin: (x) => (Math.abs(x) <= 1 ? Math.asin(x) : NaN), acos: (x) => (Math.abs(x) <= 1 ? Math.acos(x) : NaN), atan: Math.atan,
   sinh: Math.sinh, cosh: Math.cosh, tanh: Math.tanh,
   ln: (x) => (x > 0 ? Math.log(x) : NaN), log10: (x) => (x > 0 ? Math.log10(x) : NaN), exp: Math.exp,
@@ -851,11 +918,17 @@ function compareExpr(A: Node, B: Node): Cmp {
   const vs = [...varsOf(B, varsOf(A))];
   if (!vs.length) return compareConst(A, B);
   let good = 0, posGood = 0, exactBad = 0, strongBad = 0, posBad = 0, amb = 0;
-  const pts = [...points(vs, false, 20).map((p) => [p, false] as const), ...points(vs, true, 12, 3).map((p) => [p, true] as const)];
+  const pts = [...points(vs, true, 12, 3).map((p) => [p, true] as const), ...points(vs, false, 20).map((p) => [p, false] as const)];
   for (const [p, pos] of pts) {
-    const a = ex(A, p), b = ex(B, p);
-    let r: 'eq' | 'X' | 'ne' | 'amb' | 'skip';
-    if (a && b) r = req(a, b) ? 'eq' : 'X';
+    let r: 'eq' | 'X' | 'ne' | 'amb' | 'skip' | null = null;
+    { // fast path: floats agreeing to 1e-12 are equal (exact rationals are only needed as evidence of a difference)
+      const env = toEnv(p);
+      const [x, sa] = fval(A, env), [y, sb] = fval(B, env);
+      if (Number.isFinite(x) && Number.isFinite(y) && Math.abs(x - y) <= 1e-12 * Math.max(sa, sb)) r = 'eq';
+    }
+    const a = r ? null : ex(A, p), b = r ? null : ex(B, p);
+    if (r) { /* equal */ }
+    else if (a && b) r = req(a, b) ? 'eq' : 'X';
     else {
       const env = toEnv(p);
       const [x, sa] = fval(A, env), [y, sb] = fval(B, env);
@@ -869,6 +942,7 @@ function compareExpr(A: Node, B: Node): Cmp {
     else if (r === 'X') { exactBad++; strongBad++; if (pos) posBad++; }
     else if (r === 'ne') { strongBad++; if (pos) posBad++; }
     else if (r === 'amb') amb++;
+    if ((exactBad >= 2 && posBad >= 1) || (strongBad >= 8 && posBad >= 3)) return 'different'; // enough evidence
   }
   const bad = strongBad;
   if (!bad && !amb && good >= 6) return 'equal';
@@ -882,7 +956,7 @@ function compareExpr(A: Node, B: Node): Cmp {
 function ratioEquiv(f1: Node, f2: Node, vs: string[]): boolean {
   let refQ: Rat | null = null, refF: number | null = null, n = 0;
   for (const p of points(vs, false, 16)) {
-    const a = ex(f1, p), b = ex(f2, p);
+    const a = ex(f1, p), b = a ? ex(f2, p) : null;
     if (a && b) {
       if (a.n === 0n) { if (b.n !== 0n) return false; continue; }
       const r = rdiv(b, a)!;
@@ -1129,6 +1203,7 @@ function mutateExpr(root: Node): Mut[] {
           }
         }
         if (a!.t === 'pow' && b!.t === 'pow' && same(a!.a!, b!.a!)) put('Exponent rule', m, npow(a!.a!, nmul(a!.b!, b!.b!)));
+        if (same(a!, b!) && hasVars(a!)) put('Like terms', m, nmul(num(rq(2)), a!)); // x·x -> 2x
         if (a!.t === 'div' && !a!.paren) put('Order of operations', m, ndiv(a!.a!, nmul(a!.b!, b!)));
         if (b!.t === 'pow' && !b!.paren) put('Order of operations', m, npow(nmul(a!, b!.a!), b!.b!));
         break;
@@ -1144,6 +1219,10 @@ function mutateExpr(root: Node): Mut[] {
         if (a!.t === 'mul' && !a!.paren && a!.sym !== '') put('Order of operations', m, nmul(a!.a!, N(m.t, { a: a!.b!, b: b! })));
         if (m.t === 'add' && a!.t === 'sub' && !a!.paren) put('Order of operations', m, nsub(a!.a!, nadd(a!.b!, b!)));
         if (m.t === 'sub' && a!.t === 'sub' && !a!.paren) put('Order of operations', m, nsub(a!.a!, nsub(a!.b!, b!)));
+        // like terms: 2x+3x -> 5x^2
+        const coef = (n: Node): [Rat, Node] | null => (n.t === 'mul' && n.a!.t === 'num' ? [n.a!.q!, n.b!] : n.t === 'var' ? [ONE, n] : null);
+        const ca = coef(a!), cb = coef(b!);
+        if (m.t === 'add' && ca && cb && same(ca[1], cb[1])) put('Like terms', m, nmul(num(radd(ca[0], cb[0])!), npow(ca[1], num(rq(2)))));
         if (a!.t === 'div' && b!.t === 'div') {
           put('Adding fractions', m, ndiv(N(m.t, { a: a!.a!, b: b!.a! }), N(m.t, { a: a!.b!, b: b!.b! })));
           put('Adding fractions', m, ndiv(N(m.t, { a: a!.a!, b: b!.a! }), nmul(a!.b!, b!.b!)));
@@ -1299,12 +1378,16 @@ const HINTS: Record<string, string> = {
   'Power rule': 'Bring the exponent down as a factor and lower the exponent by one.',
   'Derivative slip': 'Differentiate term by term and check each rule you used.',
   'Dropped a term': 'Compare term by term with the line before; one term went missing.',
+  'Like terms': 'Adding like terms adds the coefficients; the power stays the same.',
   'Extra term': 'Compare term by term with the line before; one term does not belong.',
   'Not equivalent': 'Check what you did to both sides in this step.',
   'Lost a solution': 'Dividing by an expression that can be zero can lose solutions. Factor instead.',
   'May add solutions': 'Squaring or multiplying by an expression can add solutions; check them at the end.',
   'Missing a solution': 'Is there another value that also works?',
   'Holds for positive values': 'This is only true under an assumption such as $x \\ge 0$.',
+  'Check the endpoint': 'Is the endpoint itself a solution?',
+  'Check the reading': 'Was this meant as a power?',
+  'Percent notation': 'Write the percentage as a factor to make it unambiguous.',
   "Couldn't verify": 'The checker could not decide this step on the device.',
 };
 const DETAILS: Record<string, string> = {
@@ -1326,11 +1409,15 @@ const DETAILS: Record<string, string> = {
   'Power rule': 'The power rule was applied incorrectly.',
   'Derivative slip': 'This derivative is not correct.',
   'Dropped a term': 'A term from the previous line is missing.',
+  'Like terms': 'Like terms were combined incorrectly: $2x+3x = 5x$, and $x\cdot x = x^2$.',
   'Extra term': 'A term appeared that should not be here.',
   'Lost a solution': 'This step can lose a solution of the previous line.',
   'May add solutions': 'This step can introduce solutions the previous line does not have.',
   'Missing a solution': 'The previous line has another solution that is not listed.',
   'Holds for positive values': 'This holds for positive values but not for all values.',
+  'Check the endpoint': 'The endpoint is included on one line and excluded on the other.',
+  'Check the reading': 'This line is right if it was meant as a power, e.g. $2^3$.',
+  'Percent notation': 'Read as a calculator-style percentage, e.g. $50+20\\% = 50\\cdot 1.2$.',
   "Couldn't verify": 'This step could not be verified automatically.',
 };
 
@@ -1624,7 +1711,7 @@ function internalChecks(s: Stmt, ctx: Ctx): Finding[] {
         const deriv = hasKind(A, 'deriv') || hasKind(B, 'deriv') || !!A.fv || !!B.fv;
         const required = k >= 1 || (s.lead !== null && k === 0) || idMode || deriv;
         if (!required) continue;
-        if (vA !== vB && !deriv) continue; // substitution such as "y = 2x+3 = 2·3+3"
+        if (vA !== vB) continue; // substitution "y = 2x+3 = 2·3+3", or an equation "f'(x) = 0"
         if (B.s < 0) continue;
         if ((hasKind(B, 'deriv') && !hasKind(A, 'deriv')) || (B.fv && !A.fv)) out.push(identityPair(B, A, ctx));
         else out.push(identityPair(A, B, ctx));
@@ -1689,6 +1776,51 @@ function bestTemplate(eq: Eq, Ce: Eq[]): string {
   return best;
 }
 
+/** digits after the decimal point of a written number (or its negation); -1 when it is not a decimal */
+function decimalsOf(n: Node): number {
+  const t = n.t === 'neg' ? n.a! : n;
+  return t.t === 'num' && t.txt && /[.,]/.test(t.txt) ? t.txt.split(/[.,]/)[1].length : -1;
+}
+const TRIG_ALL = ['sin', 'cos', 'tan', 'cot', 'sec', 'csc'];
+/**
+ * "3x=7" then "x=2.33", "A=π·9" then "A=28.27", "sin(x)=0.5" then "x=30": a solved value written as a
+ * rounded decimal (or in degrees for a trig equation) is right when P has a root within one unit of
+ * the last written digit. Returns OK, an 'unsure' when other roots are left out, or null.
+ */
+function roundedAnswer(P: Eq[], C: Eq[]): Finding | null {
+  if (!C.length || !C.every((e) => isSolvedEq(e))) return null;
+  const vs = new Set([...P, ...C].flatMap((e) => [...varsOf(e[0]), ...varsOf(e[1])]));
+  if (vs.size !== 1) return null;
+  const v = [...vs][0];
+  const trig = P.some((e) => [e[0], e[1]].some((x) => { let f = false; walk(x, (m) => { if (m.t === 'fn' && TRIG_ALL.includes(m.name!) && hasVar(m.a!, v)) f = true; }); return f; }));
+  const f = (x: number) => { let best = Infinity; for (const e of P) { const [l, s1] = fval(e[0], { [v]: x }), [r, s2] = fval(e[1], { [v]: x }); if (Number.isFinite(l) && Number.isFinite(r)) best = Math.min(best, Math.abs(l - r) / Math.max(s1, s2)); } return best; };
+  const sgn = (x: number) => { for (const e of P) { const l = fval(e[0], { [v]: x })[0] - fval(e[1], { [v]: x })[0]; if (Number.isFinite(l)) return Math.sign(l); } return NaN; };
+  const near = (lo: number, hi: number) => {
+    if (f(lo) <= 1e-9 || f(hi) <= 1e-9 || f((lo + hi) / 2) <= 1e-9) return true;
+    const a = sgn(lo), b = sgn(hi);
+    return Number.isFinite(a) && Number.isFinite(b) && a !== b && f((lo + hi) / 2) < 0.5;
+  };
+  const vals: number[] = [];
+  let anyRounded = false;
+  for (const e of C) {
+    const c = e[0].t === 'var' ? e[1] : e[0];
+    const k = decimalsOf(c);
+    const [cv] = fval(c, {});
+    if (!Number.isFinite(cv)) return null;
+    if (k < 0 && !trig) return null;
+    const d = k >= 0 ? Math.pow(10, -k) : 1e-9 * Math.max(1, Math.abs(cv));
+    const deg = Math.PI / 180;
+    if (near(cv - d, cv + d)) { anyRounded = anyRounded || k >= 0; vals.push(cv); continue; }
+    if (trig && near((cv - d) * deg, (cv + d) * deg)) { anyRounded = true; vals.push(cv * deg); continue; }
+    return null;
+  }
+  if (!anyRounded) return null;
+  if (trig) return OK;
+  const roots = P.flatMap((e) => rootsOf(e, v, {}));
+  const missing = roots.some((r) => !vals.some((x) => Math.abs(x - r.x) <= 0.5 * Math.max(1e-6, Math.abs(r.x) * 1e-2, 0.1)));
+  return missing ? unsure('Missing a solution') : OK;
+}
+
 /** some solution of P is also a solution of C (a partly right step, not a new problem) */
 function sharedRoot(P: Eq[], C: Eq[], v: string): boolean {
   return P.flatMap((eq) => rootsOf(eq, v, {})).some((r) => satisfies(C, r, v, {}) === 'yes');
@@ -1713,6 +1845,10 @@ function stepCheck(P: Stmt, C: Stmt, ctx: Ctx): Finding {
   if (ep.k === 'eq' && ec.k === 'eq') {
     const r = compareEqs(ep.eqs, ec.eqs);
     if (r === 'equiv') return OK;
+    // a final answer "x = 2" ends the problem: what follows is a new problem, not a step
+    if (ep.eqs.every((e) => isSolvedEq(e) && (plainNumber(e[0]) || plainNumber(e[1])))) return NONE;
+    const rounded = roundedAnswer(ep.eqs, ec.eqs);
+    if (rounded) return rounded;
     let title = '';
     if ((r === 'diff' || (multi && r === 'unknown')) && ep.eqs.length === 1) title = bestTemplate(ep.eqs[0], ec.eqs);
     // a known misconception is proof this is a step; otherwise it could be a new problem
@@ -1727,7 +1863,8 @@ function stepCheck(P: Stmt, C: Stmt, ctx: Ctx): Finding {
   }
   if (ep.k === 'ineq' && ec.k === 'ineq') {
     const r = compareIneqs(ep.conds, ec.conds);
-    if (r === 'equiv') return OK;
+    const strict = (cs: Cond[]) => cs.map((c) => c[1] === '<' || c[1] === '>').sort().join();
+    if (r === 'equiv') return strict(ep.conds) === strict(ec.conds) ? OK : unsure('Check the endpoint');
     if (r === 'domain') return unsure('Holds for positive values');
     if (r !== 'diff') return unsure("Couldn't verify");
     if (multi) return NONE;
@@ -1810,7 +1947,7 @@ function eqError(Pe: Eq[], C: Stmt, Ce: Eq[], title: string, ctx: Ctx): Finding 
 }
 
 /** a single line that matches a known misconception, e.g. "(a+b)^2 = a^2+b^2" */
-function standaloneCheck(s: Stmt, ctx: Ctx): Finding {
+function standaloneCheck(s: Stmt, ctx: Ctx, afterLine = false): Finding {
   if (s.rels.length !== 1 || s.rels[0].ops.length !== 1 || s.rels[0].ops[0] !== '=') return NONE;
   const [L, R] = s.rels[0].parts;
   if (!hasVars(L) && !hasVars(R)) return NONE;
@@ -1820,24 +1957,35 @@ function standaloneCheck(s: Stmt, ctx: Ctx): Finding {
       if (compareExpr(m.node, W) !== 'equal') continue;
       const f = identityError(E, W, ctx, 'identity');
       f.title = m.title; f.detail = DETAILS[m.title]; f.hint = HINTS[m.title];
-      const strong = varsOf(L).size + varsOf(R).size >= 2 && new Set([...varsOf(L), ...varsOf(R)]).size >= 2;
+      const strong = afterLine || new Set([...varsOf(L), ...varsOf(R)]).size >= 2;
       return strong ? { ...f, standalone: true } : { ...f, verdict: 'unsure', standalone: true };
     }
   }
   return NONE;
 }
 
+/** substitute user functions and derivative notation (f(2), f'(x), f''(1), y', y'') from earlier definitions */
 function resolveCalls(s: Stmt, defs: Ctx['defs']): Stmt | null {
   let bad = false;
+  const nth = (name: string): { body: Node; param: string; primes: number } | null => {
+    const primes = (name.match(/'+$/) ?? [''])[0].length;
+    const d = defs.get(name.slice(0, name.length - primes));
+    if (!d) return null;
+    let body: Node | null = d.body;
+    for (let i = 0; i < primes && body; i++) body = D(body, d.param);
+    return body ? { body, param: d.param, primes } : null;
+  };
   const out = mapStmt(s, (x) => mapNodes(x, (m) => {
+    if (m.t === 'var' && m.name!.endsWith("'")) {
+      const r = nth(m.name!);
+      if (!r) { bad = true; return null; }
+      return { ...mapNodes(r.body, () => null), s: m.s, e: m.e, paren: '(', fv: 'd' };
+    }
     if (m.t !== 'call') return null;
-    const prime = m.name!.endsWith("'");
-    const d = defs.get(m.name!.replace("'", ''));
-    if (!d) { bad = true; return null; }
-    let body = d.body;
-    if (prime) { const db = D(body, d.param); if (!db) { bad = true; return null; } body = db; }
+    const r = nth(m.name!);
+    if (!r) { bad = true; return null; }
     const arg = mapNodes(m.a!, () => null);
-    return { ...mapNodes(body, (k) => (k.t === 'var' && k.name === d.param ? { ...arg, paren: '(' } : null)), s: m.s, e: m.e, paren: undefined, fv: prime ? 'd' : true };
+    return { ...mapNodes(r.body, (k) => (k.t === 'var' && k.name === r.param ? { ...arg, paren: '(' } : null)), s: m.s, e: m.e, paren: undefined, fv: r.primes ? 'd' : true };
   }));
   return bad ? null : out;
 }
@@ -1845,6 +1993,14 @@ function definitionOf(s: Stmt): [string, string, Node] | null {
   if (s.rels.length !== 1 || s.rels[0].ops.length !== 1 || s.rels[0].ops[0] !== '=') return null;
   const [L, R] = s.rels[0].parts;
   if (L.t === 'call' && !L.name!.endsWith("'") && L.a!.t === 'var') return [L.name!, L.a!.name!, R];
+  return null;
+}
+/** "y = x^2": y as a function of one variable, for y' and y'' (also still an ordinary equation) */
+function yDefinitionOf(s: Stmt): [string, string, Node] | null {
+  if (s.rels.length !== 1 || s.rels[0].ops.length !== 1 || s.rels[0].ops[0] !== '=') return null;
+  const [L, R] = s.rels[0].parts;
+  const vs = [...varsOf(R)];
+  if (L.t === 'var' && !L.name!.endsWith("'") && vs.length === 1 && vs[0] !== L.name && !hasKind(R, 'call')) return [L.name!, vs[0], R];
   return null;
 }
 
@@ -1884,7 +2040,7 @@ function judgeStmt(P: Stmt | null, C: Stmt, ctx: Ctx, label: boolean): Finding {
   fs.push(step);
   if (step.verdict === 'none' && !C.lead && ec.k === 'eq') {
     const internal = combine(fs);
-    if (internal.verdict === 'none' || internal.verdict === 'ok') fs.push(standaloneCheck(C, ctx));
+    if (internal.verdict === 'none' || internal.verdict === 'ok') fs.push(standaloneCheck(C, ctx, P !== null));
   }
   return combine(fs);
 }
@@ -1906,6 +2062,18 @@ function judgeLine(prev: Stmt | null, cur: Parsed, defs: Ctx['defs']): LineOut {
 }
 
 // ---- public API -----------------------------------------------------------------------------------
+
+/** "x = 2" or "x = 2 or x = 3": a line that states final values */
+function isFinalAnswer(s: Stmt): boolean {
+  const e = effOf(s);
+  return e.k === 'eq' && e.eqs.every((q) => isSolvedEq(q) && (plainNumber(q[0]) || plainNumber(q[1])));
+}
+
+function answerValues(s: Stmt): string[] {
+  const e = effOf(s);
+  if (e.k !== 'eq') return [];
+  return e.eqs.map((q) => { const c = plainNumber(q[0]) ? q[0] : q[1]; const v = ex(c, {}); return v ? ratText(v) : '?'; });
+}
 
 /** a plausible reading of one line (the primary text or a recogniser alternate with p >= 0.1) */
 interface Reading { parsed: Parsed; p: number; primary: boolean }
@@ -1931,7 +2099,7 @@ const MISCONCEPTION: Record<string, string> = {
   'Adding fractions': 'fraction-add-denominators', 'Order of operations': 'order-of-operations', 'Arithmetic slip': 'arithmetic',
   'Not a solution': 'arithmetic', 'Inverse operation': 'inverse-operation', 'Inequality sign': 'inequality-flip',
   'Power rule': 'power-rule', 'Derivative slip': 'derivative', 'Log rule': 'log-rule', 'Not linear': 'function-linearity',
-  'Dropped a term': 'dropped-term', 'Extra term': 'extra-term',
+  'Dropped a term': 'dropped-term', 'Extra term': 'extra-term', 'Like terms': 'like-terms',
 };
 
 /**
@@ -1947,23 +2115,36 @@ export function checkSteps(lines: LineRecognition[]): { lines: LineCheck[]; issu
   const findings: (Finding | null)[] = [];
   let prev: Hist | null = null;
   let inError = false; // a line of the current chain was wrong: later sound steps are carried
+  let anchor: Stmt | null = null; // the last equation of the chain that is not a final answer
+  let listed = new Set<string>(); // values already stated as final answers since the anchor
   for (const line of lines) {
     if (line.kind !== 'math') { checks.push({ lineId: line.lineId, verdict: 'none' }); findings.push(null); continue; }
     const variants = parseVariants(line.text);
-    if (!variants.length) { checks.push({ lineId: line.lineId, verdict: 'none' }); findings.push(null); prev = null; inError = false; continue; }
+    if (!variants.length) { checks.push({ lineId: line.lineId, verdict: 'none' }); findings.push(null); prev = null; inError = false; anchor = null; continue; }
     const prevLasts = prev ? prev.lasts : [null];
     const res = judgeLineSafe(prevLasts[0], variants[0], defs);
     let f = res.f;
     const lasts: (Stmt | null)[] = [res.last];
     for (const v of variants.slice(1)) lasts.push(judgeLineSafe(prevLasts[0], v, defs).last);
     const readings = readingsOf(line, variants);
+    // "x^2-5x+6=0", "x=2", "x=4": a second final answer is checked against the equation it answers
+    let corrected = false;
+    if (f.verdict === 'none' && anchor && prev?.last && isFinalAnswer(prev.last) && res.last && isFinalAnswer(res.last) && !answerValues(res.last).every((v) => listed.has(v))) {
+      const r = judgeLineSafe(anchor, variants[0], defs).f;
+      // candidates of a root / log / |…| equation may be extraneous: never red there
+      const domain = anchor.rels.some((rl) => rl.parts.some((x) => { let d = false; walk(x, (m) => { if (m.t === 'fn' && ['sqrt', 'root', 'abs', 'ln', 'log10', 'logb'].includes(m.name!)) d = true; }); return d; }));
+      f = r.verdict === 'error' ? (domain ? { ...r, verdict: 'unsure' } : r) : r.verdict === 'none' ? f : OK;
+      if (f.verdict === 'ok' && prev.verdict === 'error') corrected = true;
+    }
     if (f.verdict === 'error') {
       // parse ambiguity (decimal comma, 1/2x, log base, degrees): any sound parse wins
       let best: Finding | null = null;
       for (const pl of prevLasts) for (const v of variants) {
         if (pl === prevLasts[0] && v === variants[0]) continue;
         const r = judgeLineSafe(pl, v, defs);
-        if (r.f.verdict !== 'error' && (!best || rankV[r.f.verdict] < rankV[best.verdict] || (best.verdict === 'none' && r.f.verdict === 'ok'))) best = r.f;
+        let rf = r.f;
+        if (v.note && rf.verdict !== 'error') rf = unsure(v.note === 'pct' ? 'Percent notation' : 'Check the reading', null);
+        if (rf.verdict !== 'error' && (!best || rankV[rf.verdict] < rankV[best.verdict] || (best.verdict === 'none' && rf.verdict === 'ok'))) best = rf;
       }
       if (best) f = best.verdict === 'none' && prevLasts[0] ? { ...f, verdict: 'unsure' } : best;
     }
@@ -1981,7 +2162,6 @@ export function checkSteps(lines: LineRecognition[]): { lines: LineCheck[]; issu
       if (rescue >= 0.4) f = NONE; // a likely alternate reading is fine: say nothing
       else if (rescue > 0) f = { ...f, verdict: 'unsure', detail: `${f.detail} (This may also be a misread.)` };
     }
-    let corrected = false;
     if (((f.verdict === 'error' && f.step) || (f.verdict === 'none' && prev?.verdict === 'error')) && hist.length > 1) {
       // a rewrite that agrees with an earlier line (e.g. the student corrected a wrong step)
       for (let k = hist.length - 2; k >= Math.max(0, hist.length - 6); k--) {
@@ -1994,7 +2174,10 @@ export function checkSteps(lines: LineRecognition[]): { lines: LineCheck[]; issu
     if (f.verdict === 'error' && conf < MIN_ERROR_CONFIDENCE) f = { ...f, verdict: 'unsure', detail: `${f.detail} (The handwriting reading is uncertain.)` };
     if (f.verdict === 'error' && !(f.span && f.span[0] >= 0 && f.span[1] > f.span[0])) f = { ...f, verdict: 'unsure' }; // not localised
     // register definitions after judging, so "f(x)=..." itself is 'none'
-    for (const st of variants[0].segs) { const d = definitionOf(st); if (d) defs.set(d[0], { param: d[1], body: d[2] }); }
+    for (const st of variants[0].segs) { const d = definitionOf(st) ?? yDefinitionOf(st); if (d) defs.set(d[0], { param: d[1], body: d[2] }); }
+    if (res.last && !isFinalAnswer(res.last) && effOf(res.last).k === 'eq') { anchor = res.last; listed = new Set(); }
+    else if (!res.last) anchor = null;
+    if (res.last && isFinalAnswer(res.last)) for (const v of answerValues(res.last)) listed.add(v);
     const h: Hist = { last: res.last, lasts, verdict: f.verdict, rec: line, readings };
     hist.push(h);
     prev = h;
@@ -2171,18 +2354,33 @@ export function evaluate(lines: LineRecognition[], vars?: ReadonlyMap<string, st
   };
   const known = (n: Node) => [...varsOf(n)].every((v) => v in f);
   for (const [name, text] of vars ?? []) {
-    const p = parseOne(text, false, false);
+    const p = parseOne(text, /\d,\d/.test(text), false);
     const r = p?.segs[0]?.rels[0];
     if (r && !r.ops.length && known(r.parts[0])) assign(name, r.parts[0]);
   }
   const out: { lineId: string; value: string; latex: string }[] = [];
+  const rebound = new Set<string>(); // "e = 5", "pi = 3": the name is a variable from then on
+  const cd = (x: string) => /\d,\d/.test(x) && !/\d,\s/.test(x);
+  const prep = (p: Parsed | null): Parsed | null => p && {
+    ...p,
+    segs: p.segs.map((st) => mapStmt(st, (x) => mapNodes(x, (m) => {
+      if (m.t === 'const' && rebound.has(m.name!)) return { ...m, t: 'var' };
+      // one rule shared with checkSteps' degree reading: a whole-number trig argument of 7 or more is degrees
+      if (m.t === 'fn' && TRIG_ALL.includes(m.name!)) {
+        const a = m.a!;
+        const lit = a.t === 'num' ? a : a.t === 'neg' && a.a!.t === 'num' ? a.a! : null;
+        if (lit && lit.q!.d === 1n && babs(lit.q!.n) >= 7n) return { ...m, a: nmul({ ...a }, ndiv(N('const', { name: 'pi' }), num(rq(180)))) };
+      }
+      return null;
+    }))),
+  };
   for (const line of lines) {
     if (line.kind !== 'math') continue;
     const t = line.text.trimEnd();
     try {
       if (/=$/.test(t) && !/[<>!≤≥]=$|==$/.test(t)) {
         const body = t.slice(0, -1);
-        const p = parseOne(body, /\d,\d/.test(body) && !/\d,\s/.test(body), false);
+        const p = prep(parseOne(body, cd(body), false));
         const st = p?.segs[p.segs.length - 1];
         const rel = st?.rels.length === 1 ? st.rels[0] : null;
         if (!rel) continue;
@@ -2194,9 +2392,10 @@ export function evaluate(lines: LineRecognition[], vars?: ReadonlyMap<string, st
         if (fm) out.push({ lineId: line.lineId, ...fm });
         continue;
       }
-      // assignments: "a = 3", "b = 2a+1"
-      const p = parseOne(t, false, false);
+      // assignments: "a = 3", "b = 2a+1", "e = 5"
+      const p = prep(parseOne(t, cd(t), false));
       const r = p?.segs.length === 1 && p.segs[0].rels.length === 1 ? p.segs[0].rels[0] : null;
+      if (r && r.ops.length === 1 && r.ops[0] === '=' && r.parts[0].t === 'const' && known(r.parts[1])) { rebound.add(r.parts[0].name!); assign(r.parts[0].name!, r.parts[1]); continue; }
       if (r && r.ops.length === 1 && r.ops[0] === '=' && r.parts[0].t === 'var' && !hasVar(r.parts[1], r.parts[0].name!) && known(r.parts[1])) assign(r.parts[0].name!, r.parts[1]);
     } catch {
       // unparsable line: no live result
@@ -2213,7 +2412,13 @@ function rng(seed: number) {
 }
 
 /** the verified answer of a parsed problem, or null if it has none or it is not nice */
-function answerOf(p: Parsed): string | null {
+/** a root as an answer: integers, or terminating decimals (<= 4 places) when the problem has decimals */
+function niceRoot(q: Rat, dec: boolean): string | null {
+  if (q.d === 1n) return q.n.toString();
+  if (!dec || 10000n % q.d !== 0n) return null;
+  return String(rnum(q));
+}
+function answerOf(p: Parsed, dec = false): string | null {
   if (p.segs.length !== 1) return null;
   const st = p.segs[0];
   const e = effOf(st);
@@ -2227,10 +2432,10 @@ function answerOf(p: Parsed): string | null {
     if (vs.length !== 1) return null;
     const v = vs[0];
     const roots = rootsOf(e.eqs[0], v, {});
-    if (!roots.length || roots.some((r) => !r.q || r.q.d !== 1n)) return null;
+    if (!roots.length || roots.some((r) => !r.q || niceRoot(r.q, dec) === null)) return null;
     // verify each root exactly in the problem itself
     for (const r of roots) { const env = { [v]: r.q! }; const a = ex(e.eqs[0][0], env), b = ex(e.eqs[0][1], env); if (!a || !b || !req(a, b)) return null; }
-    return roots.map((r) => `${v}=${r.q!.n}`).sort().join(' or ');
+    return roots.map((r) => `${v}=${niceRoot(r.q!, dec)}`).sort().join(' or ');
   }
   if (e.k === 'ineq' && e.conds.length === 1) {
     const [L, op, R] = e.conds[0];
@@ -2250,9 +2455,15 @@ function answerOf(p: Parsed): string | null {
 
 /** an isomorphic problem with new numbers whose answer the CAS has verified, or null */
 export function variant(problem: string, seed: number): { problem: string; answer: string } | null {
+  const trailingEq = /=\s*$/.test(problem.trim());
   const text = problem.trim().replace(/=\s*$/, '');
   const parsed = parseOne(text, false, false);
   if (!parsed) return null;
+  // keep the shape: same kind of answer (identities and unsolvable problems have none), same number of roots
+  const hasDec = /\d\.\d/.test(text);
+  const orig = answerOf(parsed, true);
+  if (orig === null) return null;
+  const shape = (a: string) => `${a.split(' or ').length}:${/[=<>≤≥]/.test(a) ? 'rel' : /[a-z]/.test(a) ? 'poly' : 'num'}`;
   // the literals we may change: not exponents, not roots' indices, not 0 or 1
   const lits: Node[] = [];
   for (const st of parsed.segs) for (const r of st.rels) for (const part of r.parts) walk(part, (m, parent) => {
@@ -2273,20 +2484,22 @@ export function variant(problem: string, seed: number): { problem: string; answe
       const lo = Math.max(decimals ? 0.1 : 2, Math.round(mag / 2)), hi = Math.max(lo + 3, Math.round(mag * 2) + 2);
       let nv = lo + rand() * (hi - lo);
       nv = decimals ? Math.round(nv * 10 ** decimals) / 10 ** decimals : Math.round(nv);
+      if (decimals && Number.isInteger(nv)) nv += (1 + Math.floor(rand() * 9)) / 10 ** decimals; // decimals stay decimals
+      nv = decimals ? Number(nv.toFixed(decimals)) : nv;
       if (nv === 1 || nv === 0) nv = 2;
       t = splice(t, m.s, m.e, String(nv));
     }
     if (t === text) continue;
     const p = parseOne(t, false, false);
     if (!p) continue;
-    const ans = answerOf(p);
-    if (ans === null) continue;
+    const ans = answerOf(p, hasDec);
+    if (ans === null || shape(ans) !== shape(orig)) continue;
     // nice answers: small, and not the trivial 0 / ±1 unless nothing else turns up
     const ns = (ans.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
     const isPoly = /[a-z]\^?\d*[a-z]?[+-]/.test(ans) && !/=|<|>|≤|≥/.test(ans);
     if (!isPoly && ns.some((n) => Math.abs(n) > (/[=<>≤≥]/.test(ans) ? 20 : 1000))) continue;
     if (attempt < 300 && /[=<>≤≥]/.test(ans) && ns.every((n) => Math.abs(n) <= 1)) continue;
-    return { problem: problem.trim().endsWith('=') ? `${t}=` : t, answer: ans };
+    return { problem: trailingEq && !t.includes('=') ? `${t}=` : t, answer: ans };
   }
   return null;
 }

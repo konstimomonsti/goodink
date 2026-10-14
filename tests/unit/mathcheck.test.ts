@@ -273,7 +273,7 @@ const WRONG: [string[], string[]][] = [
   [['(x-5)^2', '=x^2-10x⟦-25⟧'], ['Sign error']],
   [['(x+1)^2=(x+1)(x+1)=⟦x^2+1⟧'], ['Squared term by term', 'Dropped a term']],
   [['4x^2-9', '=(2x-3)(2x+⟦9⟧)'], ['Arithmetic slip']],
-  [['3x+5x', '=⟦8x^2⟧'], ['Arithmetic slip', 'Exponent rule']],
+  [['3x+5x', '=⟦8x^2⟧'], ['Arithmetic slip', 'Exponent rule', 'Like terms']],
   [['sin(x)^2+cos(x)^2+x', '=⟦2⟧+x'], ['Arithmetic slip']],
   [['sin(2x)', '=⟦2sin(x)⟧'], ['Not linear']],
   [['√(x^2+9)', '=⟦x+3⟧'], ['Root of a sum']],

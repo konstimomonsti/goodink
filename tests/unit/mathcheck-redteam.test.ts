@@ -255,7 +255,7 @@ const FALSE_POSITIVES: [id: string, block: string][] = [
 ];
 
 for (const [id, block] of FALSE_POSITIVES) {
-  test(`${id} false red: ${block}`, { todo: `${id}: correct work marked 'error' (see math-redteam.md)` }, () => {
+  test(`${id} false red (fixed, hard assertion): ${block}`, () => {
     assert.deepEqual(reds(block), [], `verdicts ${verdicts(block).join(',')}`);
   });
 }
@@ -303,7 +303,7 @@ for (const b of RECALL_MISSES) {
 // green ticks on wrong work
 const WRONG_GREEN = ['sin^-1(x)=1/sin(x)', 'x>3 ;; x≥3'];
 for (const b of WRONG_GREEN) {
-  test(`wrong green: ${b}`, { todo: 'checker says ok on wrong work (see math-redteam.md)' }, () => {
+  test(`wrong green (fixed, hard assertion): ${b}`, () => {
     assert.ok(!verdicts(b).includes('ok'), `verdicts ${verdicts(b).join(',')}`);
   });
 }
@@ -346,7 +346,7 @@ const LIVE_WRONG: [id: string, block: string, want: string[]][] = [
   ['LIVE-5', 'x=1,5 ;; 2x=', ['3']], // decimal comma in an assignment is dropped
 ];
 for (const [id, b, want] of LIVE_WRONG) {
-  test(`${id} live result: ${b}`, { todo: `${id} (see math-redteam.md)` }, () => assert.deepEqual(ev(b), want));
+  test(`${id} live result (fixed, hard assertion): ${b}`, () => assert.deepEqual(ev(b), want));
 }
 
 // ---- variant() ------------------------------------------------------------------------------------
@@ -385,7 +385,7 @@ const VARIANT_SHAPE: [id: string, p: string, check: (v: { problem: string; answe
   ['VAR-4', 'x^2-4x+4=0', (v) => !/or/.test(v.answer)], // double root becomes two roots
 ];
 for (const [id, p, check] of VARIANT_SHAPE) {
-  test(`${id} variant keeps the problem's shape: ${p}`, { todo: `${id} (see math-redteam.md)` }, () => {
+  test(`${id} variant keeps the problem's shape (fixed, hard assertion): ${p}`, () => {
     for (let seed = 1; seed <= 3; seed++) { const v = variant(p, seed); if (v) assert.ok(check(v), JSON.stringify(v)); }
   });
 }
@@ -412,7 +412,8 @@ const FAMILIES: Fam[] = [
 ];
 for (const fam of FAMILIES) {
   const blocks = Array.from({ length: 150 }, fam.gen);
-  test(`family: ${fam.name} (150 blocks)`, fam.todo ? { todo: fam.todo } : {}, () => {
+  // every family passes since the FP-1/2/5/6 fixes; `todo` documents which finding a family guarded
+  test(`family: ${fam.name} (150 blocks)${fam.todo ? ` [was ${fam.todo}]` : ''}`, () => {
     const bad = blocks.filter((b) => reds(b).length);
     assert.deepEqual(bad.slice(0, 5), [], `${bad.length}/150 red`);
   });
