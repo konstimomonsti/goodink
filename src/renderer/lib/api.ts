@@ -83,6 +83,10 @@ export interface InkWordOut { text: string; alternates: string[]; strokes: numbe
 export interface InkLineOut { group: number; text: string; words: InkWordOut[]; strokes: number[]; bbox: [number, number, number, number] }
 export interface InkAnalysis { engine: 'analyzer' | 'recognizer'; lines: InkLineOut[]; drawings: number[]; ms: number }
 
+export interface HmerOptions { model?: string; topK?: number; beam?: number; ep?: 'cpu' | 'dml'; xh?: number; pen?: number; square?: boolean; maxLen?: number; debugPng?: boolean }
+export interface HmerResult { hyps: { latex: string; logp: number; prob: number; tokens: number }[]; model: string; ep: string; ms: number; renderMs: number; encMs: number; decMs: number; steps: number; loadMs: number; debugPng?: number[] | null }
+export interface HmerStatus { models: { id: string; installed: boolean; bytes: number; loaded: boolean }[]; defaultModel: string; runtime: { Ok: string } | { Err: string } | null; dir: string }
+
 export const api = {
   /** Everything the library screen needs, in one round trip. */
   boot: async (): Promise<BootData> => {
@@ -137,8 +141,40 @@ export const api = {
   search: (q: string): Promise<SearchHit[]> => invoke('search', { q }),
   ocr: (png: Uint8Array): Promise<OcrWord[]> => invoke<OcrWord[]>('ocr', png).catch(() => []),
   /** strokes: x, y, pressure triples in page units; each group (stroke indices) is recognised on its own; no strokes = warm up */
+  /** Local handwritten-math model (src-tauri/src/hmer.rs): a line's strokes -> top-k LaTeX readings. */
+  hmerRecognize: (strokes: ArrayLike<number>[], opts: HmerOptions = {}): Promise<HmerResult> =>
+    invoke<HmerResult>('hmer_recognize', { req: { strokes: strokes.map((p) => ({ pts: Array.from(p) })), ...opts } }),
+  hmerStatus: (probe = false): Promise<HmerStatus> => invoke<HmerStatus>('hmer_status', { probe }),
+  /** downloads the model (sha256 checked); progress arrives as `hmer://progress` events */
+  hmerInstall: async (model?: string, onProgress?: (p: { model: string; file: string; received: number; total: number }) => void): Promise<void> => {
+    const un = onProgress ? await listen<{ model: string; file: string; received: number; total: number }>('hmer://progress', (e) => onProgress(e.payload)) : null;
+    try {
+      await invoke('hmer_install', { model });
+    } finally {
+      un?.();
+    }
+  },
   inkAnalyze: (strokes: ArrayLike<number>[], opts: { groups?: number[][]; engine?: 'analyzer' | 'recognizer' } = {}): Promise<InkAnalysis> =>
     invoke<InkAnalysis>('ink_analyze', { req: { strokes: strokes.map((p) => ({ pts: Array.from(p) })), groups: opts.groups ?? [], engine: opts.engine } }),
+  /**
+   * On-device dictation (Windows speech recogniser, src-tauri/src/speech.rs). Partial text streams
+   * to onPartial; stop() returns the final text. Rejects with a readable reason when Windows
+   * settings block it (online speech recognition off, no speech language, microphone blocked).
+   */
+  speechStart: async (onPartial: (text: string) => void): Promise<{ stop(): Promise<string> }> => {
+    const un = await listen<string>('speech:partial', (e) => onPartial(e.payload));
+    try {
+      await invoke('speech_start');
+    } catch (e) {
+      un();
+      throw new Error(String(e));
+    }
+    let done: Promise<string> | null = null;
+    return {
+      stop: () =>
+        (done ??= invoke<string>('speech_stop').finally(un)),
+    };
+  },
   openDialog: async (opts: { title?: string; filters: Filter[]; multi?: boolean }): Promise<string[]> => {
     const r = await openDlg({ title: opts.title, filters: opts.filters, multiple: !!opts.multi, directory: false });
     return r == null ? [] : Array.isArray(r) ? r : [r];
