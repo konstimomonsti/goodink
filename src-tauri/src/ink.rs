@@ -1,6 +1,7 @@
 //! Handwriting recognition with the ink stack built into Windows 10/11 (Windows.UI.Input.Inking),
-//! called through WinRT. Offline; nothing leaves the PC. One worker thread keeps the InkAnalyzer
-//! and the recogniser warm: the first call costs ~0.5 s, later lines ~5-15 ms.
+//! called through WinRT. Offline; nothing leaves the PC. Worker threads keep the InkAnalyzer
+//! and the recogniser warm (a pool of three, so a line's groups run in parallel): the first call
+//! costs ~0.5 s, later lines ~10-25 ms.
 //!
 //! Strokes come in groups (e.g. a fraction's numerator, an exponent); each group is recognised on
 //! its own, so 2-D math layout stays the renderer's job. Two engines:
@@ -62,7 +63,7 @@ mod imp {
     use super::*;
     use std::collections::HashMap;
     use std::sync::mpsc::{channel, Sender};
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::{Arc, Mutex, OnceLock};
     use std::time::Instant;
     use windows::core::{Interface, Result as WinResult};
     use windows::Foundation::{Point, Rect};
@@ -75,7 +76,13 @@ mod imp {
     /// page units (1/72 in) -> DIPs (1/96 in): the recogniser is tuned for ink at physical size
     const S: f32 = 96.0 / 72.0;
 
-    type Job = (InkRequest, Sender<Result<InkResult, String>>);
+    /// recognition threads, each with its own warm analyzer: a line's groups (main run, exponent,
+    /// numerator...) and a block's lines are recognised in parallel, since every InkAnalyzer pass
+    /// has a fixed cost of several ms
+    const POOL: usize = 3;
+
+    type Part = (Vec<InkLineOut>, Vec<usize>);
+    type Job = (Arc<InkRequest>, Vec<usize>, Sender<Result<Part, String>>);
 
     struct Warm {
         builder: InkStrokeBuilder,
@@ -83,35 +90,75 @@ mod imp {
         recognizer: Option<InkRecognizerContainer>,
     }
 
-    fn worker() -> &'static Mutex<Sender<Job>> {
-        static TX: OnceLock<Mutex<Sender<Job>>> = OnceLock::new();
+    fn workers() -> &'static Vec<Mutex<Sender<Job>>> {
+        static TX: OnceLock<Vec<Mutex<Sender<Job>>>> = OnceLock::new();
         TX.get_or_init(|| {
-            let (tx, rx) = channel::<Job>();
-            std::thread::Builder::new()
-                .name("ink-recog".into())
-                .spawn(move || {
-                    unsafe {
-                        let _ = RoInitialize(RO_INIT_MULTITHREADED);
-                    }
-                    let mut warm: Option<Warm> = None;
-                    for (req, reply) in rx {
-                        let r = run(&mut warm, &req).map_err(|e| format!("{} ({:?})", e.message(), e.code()));
-                        if r.is_err() {
-                            warm = None; // rebuild the engines after a failure
-                        }
-                        let _ = reply.send(r);
-                    }
+            (0..POOL)
+                .map(|k| {
+                    let (tx, rx) = channel::<Job>();
+                    std::thread::Builder::new()
+                        .name(format!("ink-recog-{k}"))
+                        .spawn(move || {
+                            unsafe {
+                                let _ = RoInitialize(RO_INIT_MULTITHREADED);
+                            }
+                            let mut warm: Option<Warm> = None;
+                            for (req, groups, reply) in rx {
+                                let r = run(&mut warm, &req, &groups).map_err(|e| format!("{} ({:?})", e.message(), e.code()));
+                                if r.is_err() {
+                                    warm = None; // rebuild the engines after a failure
+                                }
+                                let _ = reply.send(r);
+                            }
+                        })
+                        .expect("ink worker");
+                    Mutex::new(tx)
                 })
-                .expect("ink worker");
-            Mutex::new(tx)
+                .collect()
         })
     }
 
-    /// Blocks until the worker thread has recognised the request.
+    /// Blocks until the worker threads have recognised every group of the request.
     pub fn analyze(req: InkRequest) -> Result<InkResult, String> {
-        let (tx, rx) = channel();
-        worker().lock().map_err(|e| e.to_string())?.send((req, tx)).map_err(|e| e.to_string())?;
-        rx.recv().map_err(|e| e.to_string())?
+        let t0 = Instant::now();
+        let n_groups = if req.groups.is_empty() { 1 } else { req.groups.len() };
+        let use_rec = req.engine.as_deref() == Some("recognizer");
+        let req = Arc::new(req);
+        // biggest groups first, each to the least loaded worker
+        let size = |g: usize| if req.groups.is_empty() { req.strokes.len() } else { req.groups[g].len() };
+        let mut order: Vec<usize> = (0..n_groups).collect();
+        order.sort_by_key(|g| std::cmp::Reverse(size(*g)));
+        let mut parts: Vec<(Vec<usize>, usize)> = (0..POOL).map(|_| (Vec::new(), 0)).collect();
+        if req.strokes.is_empty() {
+            // warm-up: every worker loads its recogniser
+            for p in parts.iter_mut() {
+                p.0.push(0);
+            }
+        } else {
+            for g in order {
+                let p = parts.iter_mut().min_by_key(|p| p.1).unwrap();
+                p.0.push(g);
+                p.1 += size(g) + 4; // + a fixed cost per pass
+            }
+        }
+        let mut waits = Vec::new();
+        for (k, (gs, _)) in parts.into_iter().enumerate() {
+            if gs.is_empty() {
+                continue;
+            }
+            let (tx, rx) = channel();
+            workers()[k].lock().map_err(|e| e.to_string())?.send((req.clone(), gs, tx)).map_err(|e| e.to_string())?;
+            waits.push(rx);
+        }
+        let (mut lines, mut drawings) = (Vec::new(), Vec::new());
+        for rx in waits {
+            let (l, d) = rx.recv().map_err(|e| e.to_string())??;
+            lines.extend(l);
+            drawings.extend(d);
+        }
+        lines.sort_by_key(|l: &InkLineOut| l.group);
+        drawings.sort_unstable();
+        Ok(InkResult { engine: if use_rec { "recognizer" } else { "analyzer" }.into(), lines, drawings, ms: t0.elapsed().as_secs_f64() * 1000.0 })
     }
 
     fn rect(r: Rect) -> [f32; 4] {
@@ -131,53 +178,48 @@ mod imp {
         b.CreateStrokeFromInkPoints(&it, Matrix3x2::identity())
     }
 
-    fn run(warm: &mut Option<Warm>, req: &InkRequest) -> WinResult<InkResult> {
+    fn run(warm: &mut Option<Warm>, req: &InkRequest, groups: &[usize]) -> WinResult<Part> {
         if warm.is_none() {
             *warm = Some(Warm { builder: InkStrokeBuilder::new()?, analyzer: None, recognizer: None });
         }
         let w = warm.as_mut().unwrap();
-        let t0 = Instant::now();
+        let (mut lines, mut drawings) = (Vec::new(), Vec::new());
         if req.strokes.is_empty() {
-            // warm-up call: load the recognisers (~0.5 s) before the user's first line needs them
+            // warm-up call: load the recogniser (~0.5 s) before the user's first line needs it
             let s = make_stroke(&w.builder, &[0.0, 0.0, 0.5, 6.0, 8.0, 0.5, 12.0, 0.0, 0.5])?;
             let an = w.analyzer.get_or_insert(InkAnalyzer::new()?);
-            let (mut l, mut d) = (Vec::new(), Vec::new());
-            analyze_group(an, 0, &[(0, &s)], &HashMap::new(), &mut l, &mut d)?;
-            return Ok(InkResult { engine: "analyzer".into(), lines: Vec::new(), drawings: Vec::new(), ms: t0.elapsed().as_secs_f64() * 1000.0 });
+            analyze_group(an, 0, &[(0, &s)], &HashMap::new(), &mut lines, &mut drawings)?;
+            return Ok((Vec::new(), Vec::new()));
         }
-        let mut strokes: HashMap<usize, InkStroke> = HashMap::with_capacity(req.strokes.len());
-        let mut index = HashMap::new();
-        for (i, s) in req.strokes.iter().enumerate() {
-            if s.pts.len() < 3 {
-                continue;
-            }
-            let st = make_stroke(&w.builder, &s.pts)?;
-            index.insert(st.Id()?, i);
-            strokes.insert(i, st);
-        }
-        let use_rec = req.engine.as_deref() == Some("recognizer");
         let all: Vec<usize> = (0..req.strokes.len()).collect();
-        let groups: Vec<&[usize]> = if req.groups.is_empty() { vec![&all[..]] } else { req.groups.iter().map(|g| &g[..]).collect() };
-        let mut lines = Vec::new();
-        let mut drawings = Vec::new();
-        for (gi, g) in groups.into_iter().enumerate() {
-            let members: Vec<(usize, &InkStroke)> = g.iter().filter_map(|i| strokes.get(i).map(|s| (*i, s))).collect();
-            if members.is_empty() {
+        let use_rec = req.engine.as_deref() == Some("recognizer");
+        for &gi in groups {
+            let g: &[usize] = if req.groups.is_empty() { &all } else { &req.groups[gi] };
+            // strokes of this group only; their system ids map back to request indices
+            let mut owned = Vec::with_capacity(g.len());
+            let mut index = HashMap::new();
+            for &i in g {
+                let Some(s) = req.strokes.get(i) else { continue };
+                if s.pts.len() < 3 {
+                    continue;
+                }
+                let st = make_stroke(&w.builder, &s.pts)?;
+                index.insert(st.Id()?, i);
+                owned.push((i, st));
+            }
+            if owned.is_empty() {
                 continue;
             }
+            let members: Vec<(usize, &InkStroke)> = owned.iter().map(|(i, s)| (*i, s)).collect();
             if use_rec {
-                if w.recognizer.is_none() {
-                    w.recognizer = Some(InkRecognizerContainer::new()?);
-                }
-                lines.push(recognize_group(w.recognizer.as_ref().unwrap(), gi, &members)?);
+                let rec = w.recognizer.get_or_insert(InkRecognizerContainer::new()?);
+                lines.push(recognize_group(rec, gi, &members)?);
             } else {
-                if w.analyzer.is_none() {
-                    w.analyzer = Some(InkAnalyzer::new()?);
-                }
-                analyze_group(w.analyzer.as_ref().unwrap(), gi, &members, &index, &mut lines, &mut drawings)?;
+                let an = w.analyzer.get_or_insert(InkAnalyzer::new()?);
+                analyze_group(an, gi, &members, &index, &mut lines, &mut drawings)?;
             }
         }
-        Ok(InkResult { engine: if use_rec { "recognizer" } else { "analyzer" }.into(), lines, drawings, ms: t0.elapsed().as_secs_f64() * 1000.0 })
+        Ok((lines, drawings))
     }
 
     fn bbox_of(words: &[InkWord]) -> [f32; 4] {
