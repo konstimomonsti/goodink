@@ -86,3 +86,26 @@ pen settles (600 ms) → groupInk (<2 ms)
 | Exam mode and pause-per-page | engine, ui |
 
 Later: inline graphing, unit checking, ghost next step in the user's own ink, photo → ink.
+
+## D. Scope: everything a mathematics degree needs (decided 2026-10-14)
+
+The owner requires recognition and checking for all mathematics up to a full mathematics degree.
+Coverage is defined in `docs/live-ink/MATH-COVERAGE.md` and measured with the corpus in
+`tests/live/corpus/`.
+
+1. **LaTeX is the canonical format for math lines.** `LineRecognition.latex` is the source of
+   truth. The math module parses LaTeX directly; `text` stays as a linear convenience for simple
+   lines. Matrices, case braces, integral and sum limits, accents and similar structures exist only
+   in LaTeX.
+2. **The local HMER model is the primary math reader.** InkAnalyzer stays the prose reader and
+   fallback. InkAnalyzer cannot represent 2-D structures (matrices, stacked limits, nested
+   fractions), so degree-level coverage depends on the HMER backend.
+3. **Local checking only where a step is decidable**, under the same zero-false-red rules:
+   arithmetic, algebra, calculus (derivatives exactly; antiderivatives by differentiating; limits
+   and definite integrals numerically, with abstention near singularities), linear algebra (matrix
+   arithmetic, det, inverse, rank, eigenpairs by `Av = λv`), complex numbers, modular arithmetic and
+   gcd, finite sums and series partial sums, ODE solutions by substitution, finite propositional
+   logic (truth tables), and finite set identities by sampling.
+4. **Proofs and anything undecidable go to the AI judge.** Examples are ε-δ arguments, induction
+   steps, quantifier logic and abstract algebra. A local verdict there is 'none'. Red needs the AI
+   judge plus an independent re-solve. Otherwise the verdict is amber or nothing.
