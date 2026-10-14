@@ -1,0 +1,59 @@
+[package]
+name = "goodink"
+version = "3.0.1"
+description = "Handwritten notes and PDF annotation for Windows pen devices"
+authors = ["goodink"]
+edition = "2021"
+rust-version = "1.80"
+
+[lib]
+name = "goodink_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["image-png", "devtools", "unstable"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+keyring = { version = "3", features = ["windows-native"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "charset"] }
+# hmer.rs: ONNX Runtime loaded at run time (no DLL in the installer), see docs/live-ink/hmer.md
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic"] }
+
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows-collections = "0.3"
+windows-numerics = "0.3"
+windows = { version = "0.62", features = [
+  "Foundation",
+  "Foundation_Collections",
+  "Foundation_Numerics",
+  "Globalization",
+  "Graphics_Imaging",
+  "Media_Ocr",
+  "Media_SpeechRecognition",
+  "Storage_Streams",
+  "UI_Input_Inking",
+  "UI_Input_Inking_Analysis",
+  "Win32_System_WinRT",
+  "Win32_System_Registry",
+  "Win32_Storage_FileSystem",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
