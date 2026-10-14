@@ -10,7 +10,7 @@ import type { CompleteRequest, ProviderId, Usage } from '../../lib/ai';
 import type { LineRecognition, Verdict } from '../contract';
 import { JUDGE_SCHEMA, mapSpan, parseAiJudge, parseAiVerify, VERIFY_SCHEMA, type AiJudge, type AiVerify } from './json';
 import type { AiLineOutcome, LocalResult } from './merge';
-import { JUDGE_SYSTEM, judgeUser, POLICY, VERIFY_SYSTEM, verifyUser, type Tier } from './policy';
+import { JUDGE_SYSTEM, judgeUser, normMisconception, POLICY, VERIFY_SYSTEM, verifyUser, type Tier } from './policy';
 
 export interface CropImage {
   mime: 'image/png' | 'image/jpeg';
@@ -169,7 +169,7 @@ export async function judgeLine(call: Caller, input: JudgeInput, hints: JudgeHin
     detail: j.detail,
     hint: j.hint,
     fix: j.fix,
-    misconception: j.misconception || undefined,
+    misconception: normMisconception(j.misconception) || undefined,
   };
   if (j.verdict !== 'error') {
     vCtrl.abort();

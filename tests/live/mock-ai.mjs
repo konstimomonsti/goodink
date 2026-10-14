@@ -45,6 +45,8 @@ export async function startMockAi(opts = {}) {
   }
 
   function reply(kind, userText) {
+    if (kind === 'check' && cfg.judge) return JSON.stringify(cfg.judge((/text: (.*)/.exec(userText)?.[1] ?? '').replace(/\s+/g, ''), userText));
+    if (kind === 'verify' && cfg.verify) return JSON.stringify(cfg.verify((/Step to verify:\n(.*)/.exec(userText)?.[1] ?? '').replace(/\s+/g, ''), userText));
     if (kind === 'check') {
       // the judge gets the local reading as text; the mock cannot see the image, so `readings`
       // (when set) stands in for what the image shows and corrects the local reading
@@ -95,6 +97,10 @@ export async function startMockAi(opts = {}) {
       const kind = kindOf(system);
       const call = { kind, at: t0, path: req.url, model: json.model, stream: !!json.stream, json: !!(json.response_format || json.output_config?.format), maxTokens: json.max_tokens ?? json.max_completion_tokens, effort: json.reasoning_effort ?? json.output_config?.effort ?? null, images, user: firstText, system, status: 200, usage: null, ms: 0 };
       calls.push(call);
+      // a client that hangs up before the answer is complete (an aborted request)
+      res.on('close', () => {
+        if (!res.writableEnded) call.closedEarly = true;
+      });
 
       if (cfg.fail && cfg.fail.times > 0) {
         cfg.fail.times--;
@@ -123,6 +129,7 @@ export async function startMockAi(opts = {}) {
         const chunk = (delta, finish = null, u) => `data: ${JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 0, model: json.model, choices: delta == null ? [] : [{ index: 0, delta, finish_reason: finish }], ...(u ? { usage: u } : {}) })}\n\n`;
         res.write(chunk({ role: 'assistant', content: '' }));
         for (let i = 0; i < text.length; i += 16) {
+          if (res.destroyed) return;
           res.write(chunk({ content: text.slice(i, i + 16) }));
           if (cfg.chunkDelay) await new Promise((r) => setTimeout(r, cfg.chunkDelay));
         }
@@ -327,6 +334,32 @@ export default async ({ win, shot }) => {
     });
     ok('hint streams progressively', hint.updates > 3 && !/>>>/.test(hint.text ?? ''), `${hint.updates} updates, first ${hint.firstMs?.toFixed(0)} ms, done ${hint.lastMs?.toFixed(0)} ms`);
     console.log('hint:', hint.text);
+
+    // 6b. real streaming: the provider sends a chunk every 80 ms; the first words must show long
+    //     before the answer is complete (time to first token), and an abort must hang up on it
+    mock.set({ chunkDelay: 80 });
+    const stream = await win.evaluate(async () => {
+      const { m, s, pid, e } = window.__lt;
+      const ui = m.createUiEngine(s);
+      const blk = e.blockFor(pid, [0, 120, 300, 230]);
+      const ins = blk && e.insightFor(pid, blk, 205);
+      const t0 = performance.now();
+      let first = null;
+      await ui.hint(ins, 1, { onDelta: (t) => t.length && first == null && (first = performance.now() - t0) });
+      const total = performance.now() - t0;
+      // abort as soon as the first words arrive
+      const ctrl = new AbortController();
+      let aborted = false;
+      await ui.hint(ins, 2, { signal: ctrl.signal, onDelta: (t) => t.length && ctrl.abort() }).catch((err) => (aborted = err?.name === 'AbortError' || /abort|cancel/i.test(String(err))));
+      ui.dispose();
+      return { first, total, aborted };
+    });
+    await win.waitForTimeout(600);
+    const tutorCalls = mock.calls.filter((c) => c.kind === 'tutor');
+    const lastTutor = tutorCalls[tutorCalls.length - 1];
+    ok('real streaming: first token long before the end', stream.first != null && stream.first < stream.total * 0.35, `first token ${stream.first?.toFixed(0)} ms, complete ${stream.total.toFixed(0)} ms`);
+    ok('abort hangs up on the provider', stream.aborted && lastTutor?.closedEarly === true, `aborted ${stream.aborted}, connection closed early ${lastTutor?.closedEarly}`);
+    mock.set({ chunkDelay: 0 });
 
     // 7. Local mode sends nothing
     mock.reset();

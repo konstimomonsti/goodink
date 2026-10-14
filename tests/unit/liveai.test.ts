@@ -536,3 +536,20 @@ test('ask fails over before any text is shown', async () => {
   assert.deepEqual(calls.map((c) => c.c.provider), ['google', 'anthropic']);
   assert.ok(ai.meter.input > 0);
 });
+
+test('misconception tags: the judge, the journal and the CAS share one list', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const src = await readFile(new URL('../../src/renderer/live/math/index.ts', import.meta.url), 'utf8');
+  const map = /const MISCONCEPTION[^=]*=\s*\{([\s\S]*?)\};/.exec(src)?.[1] ?? '';
+  const tags = new Set([...map.matchAll(/:\s*'([a-z-]+)'/g)].map((m) => m[1]));
+  assert.ok(tags.size >= 11, `found ${tags.size} CAS tags`);
+  for (const t of tags) {
+    assert.ok(t in P.MISCONCEPTIONS, `CAS tag ${t} has a name and rule`);
+    assert.ok(P.JUDGE_SYSTEM.includes(t), `the judge may answer ${t}`);
+  }
+  assert.equal(P.normMisconception('Sign-Move'), 'sign-move');
+  assert.equal(P.normMisconception('made-up'), 'other');
+  assert.equal(P.normMisconception(''), '');
+  // rules are LaTeX with real backslashes
+  assert.match(P.MISCONCEPTIONS['sign-move'].rule, /\Rightarrow/);
+});

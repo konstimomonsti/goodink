@@ -21,7 +21,7 @@ Input: the earlier steps as text (already checked), a local recogniser's reading
    wrong_span: the shortest exact substring of the step's reading that is wrong (e.g. "10", "-3", "x^2"), or "".
    title: 2 to 4 words naming the mistake (e.g. "Sign error"). detail: one sentence saying what is wrong without giving the correct result, maths in $...$.
    hint: for "error", a question that nudges towards the mistake without revealing the answer. fix: for "error", the corrected step in LaTeX.
-   misconception: for "error", one tag: sign-move, distribute-first-term, square-of-sum, exponent-rule, fraction-add, cancel-terms, divide-one-side, arithmetic, root-sign, log-rule, order-of-operations, copy-error, other.
+   misconception: for "error", one tag: sign-move, distribute-first-term, square-of-sum, cancel-terms, divide-one-side, sqrt-of-sum, exponent-product, fraction-add-denominators, order-of-operations, arithmetic, inverse-operation, inequality-flip, power-rule, derivative, log-rule, function-linearity, like-terms, dropped-term, extra-term, other.
    For "ok" all of these are "".
 4. concept: the topic in 2 to 4 words.
 Examples:
@@ -35,22 +35,38 @@ export function judgeUser(prior: string[], reading: string, latex: string): stri
   return `Earlier steps:\n${earlier}\n\nRecogniser reading of the new step:\ntext: ${reading || '?'}\nlatex: ${latex || reading || '?'}`;
 }
 
-/** Misconception tags (judge, CAS) with a name and the rule, for "Your patterns" and rule flashcards. */
+/**
+ * Misconception tags, shared with the CAS (math/index.ts MISCONCEPTION): name and rule, for
+ * "Your patterns" and rule flashcards. The judge must answer with one of these keys.
+ */
 export const MISCONCEPTIONS: Record<string, { label: string; rule: string }> = {
-  'sign-move': { label: 'Moving a term across', rule: 'A term that moves to the other side of an equation changes its sign: $x+a=b \Rightarrow x=b-a$.' },
+  'sign-move': { label: 'Moving a term across', rule: 'A term that moves to the other side of an equation changes its sign: $x+a=b \\Rightarrow x=b-a$.' },
   'distribute-first-term': { label: 'Distributing only the first term', rule: 'A factor multiplies every term in the bracket: $a(b+c)=ab+ac$.' },
-  'square-of-sum': { label: 'Squaring a sum', rule: '$(a+b)^2=a^2+2ab+b^2$, not $a^2+b^2$.' },
-  'exponent-rule': { label: 'Exponent rules', rule: '$a^m\cdot a^n=a^{m+n}$, $(a^m)^n=a^{mn}$, $a^{-n}=1/a^n$.' },
-  'fraction-add': { label: 'Adding fractions', rule: 'Add fractions over a common denominator: $\frac{a}{b}+\frac{c}{d}=\frac{ad+bc}{bd}$, never top+top over bottom+bottom.' },
-  'cancel-terms': { label: 'Cancelling terms instead of factors', rule: 'Only common factors cancel: $\frac{ab}{ac}=\frac{b}{c}$, but $\frac{a+b}{a+c}$ does not simplify that way.' },
-  'divide-one-side': { label: 'Changing only one side', rule: 'Whatever you do to one side of an equation, do to the whole other side too.' },
-  arithmetic: { label: 'Arithmetic slip', rule: 'Recompute each number in a step before moving on; a quick estimate catches most slips.' },
-  'root-sign': { label: 'Forgetting the ± of a square root', rule: '$x^2=c$ (with $c>0$) has two solutions: $x=\pm\sqrt{c}$.' },
-  'log-rule': { label: 'Logarithm rules', rule: '$\log(ab)=\log a+\log b$, $\log(a^n)=n\log a$; $\log(a+b)$ does not split.' },
+  'square-of-sum': { label: 'Squaring a sum term by term', rule: '$(a+b)^2=a^2+2ab+b^2$, not $a^2+b^2$.' },
+  'cancel-terms': { label: 'Cancelling terms instead of factors', rule: 'Only common factors cancel: $\\frac{ab}{ac}=\\frac{b}{c}$, but $\\frac{a+b}{a+c}$ does not simplify that way.' },
+  'divide-one-side': { label: 'Changing only one side or one term', rule: 'Whatever you do to an equation, do it to the whole of both sides: every term on each side.' },
+  'sqrt-of-sum': { label: 'Root of a sum', rule: '$\\sqrt{a+b}$ is not $\\sqrt{a}+\\sqrt{b}$; roots split only over products: $\\sqrt{ab}=\\sqrt{a}\\sqrt{b}$.' },
+  'exponent-product': { label: 'Exponent rules', rule: '$a^m\\cdot a^n=a^{m+n}$, $(a^m)^n=a^{mn}$, $(ab)^n=a^nb^n$, but $(a+b)^n\\neq a^n+b^n$.' },
+  'fraction-add-denominators': { label: 'Adding fractions', rule: 'Add fractions over a common denominator: $\\frac{a}{b}+\\frac{c}{d}=\\frac{ad+bc}{bd}$, never top+top over bottom+bottom.' },
   'order-of-operations': { label: 'Order of operations', rule: 'Brackets, then powers, then multiplication and division, then addition and subtraction.' },
-  'copy-error': { label: 'Copying a line wrong', rule: 'When you rewrite a line, check every sign and number against the line above.' },
+  arithmetic: { label: 'Arithmetic slip', rule: 'Recompute each number in a step before moving on; a quick estimate catches most slips.' },
+  'inverse-operation': { label: 'Wrong inverse operation', rule: 'Undo an operation with its inverse: $+$ with $-$, $\\times$ with $\\div$, a square with a square root (both signs).' },
+  'inequality-flip': { label: 'Inequality direction', rule: 'Multiplying or dividing an inequality by a negative number flips its direction.' },
+  'power-rule': { label: 'Power rule', rule: '$\\frac{d}{dx}x^n=nx^{n-1}$: bring the exponent down and lower it by one.' },
+  derivative: { label: 'Derivative slip', rule: 'Differentiate term by term, and use the product, quotient and chain rules where they apply.' },
+  'log-rule': { label: 'Logarithm rules', rule: '$\\log(ab)=\\log a+\\log b$, $\\log(a^n)=n\\log a$; $\\log(a+b)$ does not split.' },
+  'function-linearity': { label: 'Treating a function as linear', rule: 'Most functions do not split over sums: $\\sin(a+b)\\neq\\sin a+\\sin b$, $f(a+b)\\neq f(a)+f(b)$ in general.' },
+  'like-terms': { label: 'Combining unlike terms', rule: 'Only like terms combine: $3x+2x=5x$, but $3x+2$ and $x^2+x$ stay as they are.' },
+  'dropped-term': { label: 'Dropped a term', rule: 'When you rewrite a line, carry every term across; count the terms before and after.' },
+  'extra-term': { label: 'Extra term', rule: 'A rewrite must not add terms out of nowhere; check each term comes from the line above.' },
   other: { label: 'Other mistakes', rule: 'Check each step against the one before it: does it say the same thing?' },
 };
+
+/** A tag from the judge as one of MISCONCEPTIONS' keys ('other' when unknown). */
+export function normMisconception(tag: string): string {
+  const t = tag.toLowerCase().replace(/[^a-z-]/g, '');
+  return t in MISCONCEPTIONS ? t : t ? 'other' : '';
+}
 
 // ---- blind verification -------------------------------------------------------------------------
 

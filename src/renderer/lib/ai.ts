@@ -5,7 +5,7 @@
 // never live in the web view.
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 
 import type { AiSettings, ProviderId } from '../../shared/types';
 
@@ -88,6 +88,84 @@ export const savedKeys = () => invoke<ProviderId[]>('secret_has', { names: PROVI
 
 const SECRET_MARK = '__GOODINK_SECRET__';
 
+type StreamEvent = { type: 'head'; status: number; headers: [string, string][] } | { type: 'chunk'; text: string } | { type: 'end' } | { type: 'error'; message: string };
+
+/** null = not tried yet; false = this backend has no ai_fetch_stream (older build) */
+let streamingBackend: boolean | null = null;
+let streamSeq = 0;
+
+/**
+ * The request through the backend's ai_fetch_stream: the Response resolves as soon as the status
+ * and headers arrive, and its body streams the provider's bytes as they come (real token streaming
+ * for SSE). Aborting cancels the backend task, which drops the connection to the provider.
+ * Resolves null when the backend cannot stream (then ai_fetch is used).
+ */
+function streamFetch(req: { url: string; method: string; headers: [string, string][]; body?: string; secret: ProviderId | null }, signal?: AbortSignal | null): Promise<Response | null> {
+  const id = (streamSeq = (streamSeq + 1) % 0x7fffffff);
+  const enc = new TextEncoder();
+  let ctl: ReadableStreamDefaultController<Uint8Array> | null = null;
+  let done = false;
+  const bodyStream = new ReadableStream<Uint8Array>({
+    start: (c) => void (ctl = c),
+    cancel: () => {
+      // the SDK stopped reading (e.g. it aborted): stop the backend too
+      if (!done) void invoke('ai_fetch_cancel', { id }).catch(() => undefined);
+    },
+  });
+  return new Promise<Response | null>((resolve, reject) => {
+    let headSeen = false;
+    const fail = (e: unknown) => {
+      done = true;
+      if (!headSeen) reject(e);
+      else
+        try {
+          ctl?.error(e);
+        } catch {
+          /* already closed */
+        }
+    };
+    const onAbort = () => {
+      void invoke('ai_fetch_cancel', { id }).catch(() => undefined);
+      fail(new DOMException('The request was cancelled.', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    const ch = new Channel<StreamEvent>();
+    ch.onmessage = (ev) => {
+      if (done) return;
+      if (ev.type === 'head') {
+        headSeen = true;
+        const empty = ev.status === 204 || ev.status === 304;
+        resolve(new Response(empty ? null : bodyStream, { status: ev.status, headers: ev.headers }));
+      } else if (ev.type === 'chunk') ctl?.enqueue(enc.encode(ev.text));
+      else if (ev.type === 'end') {
+        done = true;
+        signal?.removeEventListener('abort', onAbort);
+        try {
+          ctl?.close();
+        } catch {
+          /* already closed */
+        }
+      } else {
+        signal?.removeEventListener('abort', onAbort);
+        fail(new Error(ev.message));
+      }
+    };
+    invoke('ai_fetch_stream', { id, req, onEvent: ch }).then(
+      () => void (streamingBackend = true),
+      (e) => {
+        signal?.removeEventListener('abort', onAbort);
+        // an older backend without the command: use the plain ai_fetch from now on
+        if (streamingBackend === null && /ai_fetch_stream|not found|unknown command/i.test(String(e))) {
+          streamingBackend = false;
+          done = true;
+          return resolve(null);
+        }
+        fail(e instanceof Error ? e : new Error(String(e)));
+      },
+    );
+  });
+}
+
 /** A fetch for the SDKs that runs the request in the backend, which adds the key. */
 function backendFetch(secret: ProviderId | null): typeof fetch {
   return async (input, init) => {
@@ -97,9 +175,12 @@ function backendFetch(secret: ProviderId | null): typeof fetch {
     const body = init?.body == null ? undefined : typeof init.body === 'string' ? init.body : await new Response(init.body).text();
     const signal = init?.signal;
     if (signal?.aborted) throw new DOMException('The request was cancelled.', 'AbortError');
-    const call = invoke<{ status: number; headers: [string, string][]; body: string }>('ai_fetch', {
-      req: { url, method: init?.method ?? 'GET', headers, body, secret },
-    });
+    const req = { url, method: init?.method ?? 'GET', headers, body, secret };
+    if (streamingBackend !== false) {
+      const r = await streamFetch(req, signal);
+      if (r) return r;
+    }
+    const call = invoke<{ status: number; headers: [string, string][]; body: string }>('ai_fetch', { req });
     // the SDK's time limit aborts the signal; stop waiting then (the backend request is left to finish)
     const r = signal
       ? await Promise.race([call, new Promise<never>((_, reject) => signal.addEventListener('abort', () => reject(new DOMException('The request took too long.', 'AbortError')), { once: true }))])
@@ -653,9 +734,12 @@ async function completeOpenAI(c: AiChoice, r: CompleteRequest): Promise<Complete
  * One request with no retries (the caller decides about retries and failover), an abort signal,
  * a token limit, optional structured JSON output, streaming and usage reporting.
  */
-export function complete(c: AiChoice, r: CompleteRequest): Promise<CompleteResult> {
-  if (!c.model) return Promise.reject(new Error('Choose a model first.'));
-  return c.provider === 'anthropic' ? completeAnthropic(c, r) : completeOpenAI(c, r);
+export async function complete(c: AiChoice, r: CompleteRequest): Promise<CompleteResult> {
+  if (!c.model) throw new Error('Choose a model first.');
+  const res = await (c.provider === 'anthropic' ? completeAnthropic(c, r) : completeOpenAI(c, r));
+  // the SDKs end an aborted stream quietly with the text so far; to the caller it is an abort
+  if (r.signal?.aborted) throw new DOMException('The request was cancelled.', 'AbortError');
+  return res;
 }
 
 export type AiFailure = 'abort' | 'busy' | 'offline' | 'auth' | 'model' | 'bad-request' | 'other';
