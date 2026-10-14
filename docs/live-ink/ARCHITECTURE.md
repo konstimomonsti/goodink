@@ -1,0 +1,88 @@
+# Live Ink: architecture decisions (from RESEARCH-recognition.md and RESEARCH-ux.md)
+
+These override SPEC.md where they differ. Decided 2026-10-14.
+
+## A. Pipeline
+
+```
+pen settles (600 ms) → groupInk (<2 ms)
+  ├─ prose: InkAnalyzer (Rust, WinRT), 15–40 ms
+  ├─ math: InkAnalyzer + 2-D layout pass (v1, now)  ║  local HMER model via `ort` in Rust (v1.1, spike)
+  │        top-k readings with probabilities (alternateProbs)
+  ├─ CAS over every reading with p ≥ 0.1 of both lines (beam × beam), 1–5 ms
+  └─ Smart/Max: the cloud JUDGES, it does not read: crop + local LaTeX + prior steps as text
+       error → independent blind re-solve, run in parallel; cross-vendor when 2 providers are ready
+```
+
+1. **The cloud confirms or corrects the reading and judges the step.** Specialised models read
+   handwritten math far better than frontier VLMs (TexTeller 86–88% vs Gemini Flash ~55% on
+   CROHME). The local reading always goes in as text, and the model returns `reading_ok` /
+   `corrected`.
+2. **Red only when every plausible reading fails.** A local-cas red needs line confidence ≥ 0.9,
+   every reading with p ≥ 0.1 failing, and an error localised to tokens. If any plausible reading
+   passes, the verdict is amber or nothing. A red from the AI needs the blind re-solve to agree and
+   the CAS not to contradict the corrected reading. Release gate: ≥ 98% red precision on the test
+   corpus.
+3. **Crops**: only the changed line, about 12 px padding, scaled so the x-height is 20–28 px, long
+   edge ≤ 1000 px, black-on-white grayscale. Prior steps go as text. The system prompt and schema
+   come first and stay static (prompt cache). Thinking is off for judge calls. Model IDs and prices
+   live in config (`live/ai/policy.ts`).
+4. **Grounding the tutor**: hint, explain and fix prompts get the CAS's correct next step or
+   solution when it has one, so the model cannot hallucinate the maths (Kestin et al.).
+5. **Local math model**: a spike with `ort` (ONNX Runtime) in Rust. It benchmarks a CoMER/TAMER-class
+   lite model (~8–15 MB) and TexTeller int8 (~120 MB) on our synthetic corpus, and the winner is
+   downloaded lazily (sha256 checked). It plugs in as a second `RecogBackend` and is fused by
+   confidence. No MathWriting-trained weights (CC BY-NC-SA).
+
+## B. UX rules (binding)
+
+- **Timing**:
+  - No work happens during a stroke.
+  - Red appears no sooner than 900 ms after pen-up. It is held while the pen is active within 2
+    line-heights, until a 1.5 s pause or the pen moves to a new line.
+  - Amber and ticks appear at settle.
+  - Erasing or editing removes marks within one frame. A fixed step gets a 600 ms green tick fade,
+    the only celebration.
+- **Marks**:
+  - Red is wavy: 1.5 px at 100%, scaled with zoom, #E5484D light / #FF6369 dark, 70% opacity,
+    250 ms ease-out draw-in, played once.
+  - Amber is dotted at 55% opacity. Its opacity scales with confidence, and hovering says "70% sure:
+    I read 5 as S?".
+  - The green tick is ≤ 10 px at 40% opacity and fades out after 4 s unless "show ticks" is on.
+  - Shape carries the meaning, not colour. With reduced motion, marks are static.
+- **First error only.** Later lines that follow correctly from it carry no mark
+  (`LineCheck.carried`); the card says "your next steps follow correctly from this". At most 3 red
+  marks per screen, with the rest collapsing into a "+n" margin dot.
+- **Card**: it opens on rung 0, which is what's wrong in one sentence, without the fix. The ladder
+  runs Hint → Next step → Show fix. "Show fix" unlocks after one hint or 10 s. Replies give one
+  step, ≤ 60 words, and ask before telling. Worked examples use different numbers. The reading is
+  shown first and is editable, and an edit rechecks in < 120 ms.
+- **Voice**: push-to-talk by default (hold the mic button, or `Space` while the card is focused),
+  with live partial transcripts. "Why?", "this" and "here" refer to the block under the pen or the
+  last block written within 10 s, which gets a 1 px focus ring while listening.
+- **AI selector**:
+  - The loop auto-closes when its end comes within 24 px of the start.
+  - The region glows in over 120 ms and stays lit while the card is open.
+  - Chips appear ≤ 100 ms after release.
+  - The card sits beside the region on the side with the most space, never over the ink, and can
+    be pinned.
+- **Quiet defaults**:
+  - Smart mode is on and ticks are off.
+  - A one-tap "Pause checking on this page" switch.
+  - Exam mode: marks stay hidden until "Reveal", then animate in together.
+- **Accessibility**: marks are focusable (Tab through them, Enter opens the card). A polite live
+  region announces after a 2 s pause. Light and dark marks meet 3:1 contrast.
+
+## C. Creative features in scope (chosen for value ÷ effort)
+
+| Feature | Owner |
+|---|---|
+| **Live result** after a trailing "=" as ghost ink (Math Notes style), with variables carried across lines (`a=3` … `2a+1=` → 7) | math `evaluate`, engine, ui (`kind: 'result'`) |
+| **Carry-forward / method marks**: steps after an error are checked relative to the wrong value | math, engine |
+| **Mistake journal**: confirmed errors tagged by misconception, a "Your patterns" view, one tap to make flashcards with the existing card system | math (tags), engine, ui |
+| **Same problem, new numbers**: a CAS-verified isomorphic practice box placed below, checked live | math `variant`, ui |
+| **Voice "why?" while writing**, with deictic resolution | tutor, ui |
+| **Explain-back check** after "Show fix": one comprehension question | tutor, ui |
+| Exam mode and pause-per-page | engine, ui |
+
+Later: inline graphing, unit checking, ghost next step in the user's own ink, photo → ink.
