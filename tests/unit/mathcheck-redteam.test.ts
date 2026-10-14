@@ -282,6 +282,7 @@ const WRONG_CAUGHT = [
   '(-2)^3=8', '0.5·0.5=2.5', '0.2·0.3=0.6', '12/0.5=6', '7·8=54', '9·6=56', '15-7=9', '25+38=53', 'x+3=7 ;; x=10',
   'x-5=2 ;; x=-3', '2x=x+5 ;; x=-5', '1/x=3 ;; x=3', 'x^2+6x+9=0 ;; (x+3)^2=0 ;; x=3', 'a/b+c/d=(a+c)/(b+d)',
   '2^-2=-4', 'log_2(8)=4', 'ln(e^2)=e', '10% of 50=10', '0.99=1', '2x=3x ;; 2=3', '3x=10 ;; x=3',
+  'x^2-5x+6=0 ;; x=2 ;; x=4', '2x+3=7 ;; 2x=10 @0.95 {{2x=4::0.05}} ;; x=4',
 ];
 test(`wrong/caught: ${WRONG_CAUGHT.length} wrong blocks are red`, () => {
   const missed = WRONG_CAUGHT.filter((b) => !reds(b).length);
@@ -291,8 +292,7 @@ test(`wrong/caught: ${WRONG_CAUGHT.length} wrong blocks are red`, () => {
 const RECALL_MISSES = [
   '2x+3x=5x^2', 'x·x=2x', 'x^3·x^2=x^6', '(3x)^2=3x^2', '2(x+3)=2x+3', '-(x-2)=-x-2', '(x+2)^2=x^2+4',
   '(x-1)(x+1)=x^2+1', 'x^-1=-x', '√(x^2+9)=x+3', '2x+4=2(x+4)', '5-(2-x)=3-x', '√(-4)=-2', 'x^3=x ;; x^2=1',
-  '|x-1|<2 ;; x<3', 'x^2=9 ;; x=3', '|x|=3 ;; x=3', 'x+y=5 ;; x-y=1 ;; 2x=8', 'x^2-5x+6=0 ;; x=2 ;; x=4',
-  '2x+3=7 ;; 2x=10 @0.95 {{2x=4::0.05}} ;; x=4',
+  '|x-1|<2 ;; x<3', 'x^2=9 ;; x=3', '|x|=3 ;; x=3', 'x+y=5 ;; x-y=1 ;; 2x=8',
 ];
 for (const b of RECALL_MISSES) {
   test(`recall miss: ${b}`, { todo: 'recall gap (see math-redteam.md)' }, () => {
@@ -301,7 +301,7 @@ for (const b of RECALL_MISSES) {
 }
 
 // green ticks on wrong work
-const WRONG_GREEN = ['sin^-1(x)=1/sin(x)', 'x>3 ;; x≥3', 'sin^-1(0.5)=2'];
+const WRONG_GREEN = ['sin^-1(x)=1/sin(x)', 'x>3 ;; x≥3'];
 for (const b of WRONG_GREEN) {
   test(`wrong green: ${b}`, { todo: 'checker says ok on wrong work (see math-redteam.md)' }, () => {
     assert.ok(!verdicts(b).includes('ok'), `verdicts ${verdicts(b).join(',')}`);
@@ -355,7 +355,7 @@ const solves = (problem: string, answer: string) => !reds(`${problem.replace(/=$
 test('variant: answers are right (independent substitution) for linear, quadratic, abs, log, exp problems', () => {
   const sub = (eq: string, x: number) => {
     const [l, r] = eq.split('=');
-    const f = (s: string) => Function('x', `return ${s.replace(/\^/g, '**').replace(/(\d)x/g, '$1*x').replace(/(\d)\(/g, '$1*(').replace(/\|([^|]+)\|/g, 'Math.abs($1)').replace(/√x/g, 'Math.sqrt(x)').replace(/log_2\(x\)/g, 'Math.log2(x)')}`)(x);
+    const f = (s: string) => Function('x', `return ${s.replace(/log_2\(x\)/g, 'L2').replace(/\^/g, '**').replace(/(\d)x/g, '$1*x').replace(/(\d)\(/g, '$1*(').replace(/\|([^|]+)\|/g, 'Math.abs($1)').replace(/√x/g, 'Math.sqrt(x)').replace(/L2/g, 'Math.log2(x)')}`)(x);
     return Math.abs(f(l) - f(r)) < 1e-9;
   };
   for (const p of ['2x+3=7', 'x^2-5x+6=0', '3(x-2)=12', 'x/4=3', 'x^2=9', '√x=3', 'log_2(x)=3', '|x-2|=3', 'x^2-4x+4=0', '3x-7=2x+1', '5x=0', '(x-3)^2=16']) {
