@@ -1149,3 +1149,4 @@ html, body { touch-action: pan-x pan-y; }
 .live-pattern-arrow { color: var(--c-text-muted); }
 .live-pattern-when { grid-column: 1 / -1; font: var(--t-xs); font-weight: 400; color: var(--c-text-muted); }
 .live-patterns-empty p { max-width: 380px; }
+.live-pattern-rule { grid-column: 1 / -1; margin-top: -2px; font: var(--t-sm); color: var(--c-text-muted); line-height: 1.45; }
