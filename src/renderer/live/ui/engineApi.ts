@@ -16,6 +16,8 @@ export type UiDecoration = Omit<LiveDecoration, 'kind'> & {
   tip?: string;
   /** shown for a while, then fades (green ticks when "show ticks" is off) */
   transient?: boolean;
+  /** red marks: 0 = show first (at most 3 show per page) */
+  priority?: number;
 };
 
 /** One confirmed mistake for the "Your patterns" journal. */
@@ -94,7 +96,7 @@ export interface LiveUiEngine {
   dispose?(): void;
   // ---- optional hooks (the UI works without them) ----
   /** the pen went down / up at a page point: lets the engine hold red near active writing */
-  notePenActivity?(pageId: string, x: number, y: number, down: boolean): void;
+  notePenActivity?(pageId: string, x: number, y: number, down?: boolean): void;
   /** stop checking one page (marks go away) or resume it */
   pausePage?(pageId: string, paused: boolean): void;
   /** exam mode: keep checking but report marks only after reveal (the UI also hides them) */
@@ -103,4 +105,13 @@ export interface LiveUiEngine {
   journal?(): JournalEntry[];
   /** one comprehension question after the fix was shown. Streams. */
   explainBack?(insight: Insight, opts: StreamOpts): Promise<string>;
+  /** exam mode: show every held mark now, together */
+  reveal?(): void;
+  isPaused?(pageId: string): boolean;
+  /** "Your patterns": mistakes grouped by misconception, with the rule to remember */
+  patterns?(): { misconception: string; label: string; rule: string; count: number; last: number; examples: string[] }[];
+  /** flashcard drafts from the journal */
+  journalCards?(opts?: { misconception?: string; max?: number }): { front: string; back: string }[];
+  /** the block "why?" / "this" refers to right now */
+  deicticTarget?(): Insight | null;
 }

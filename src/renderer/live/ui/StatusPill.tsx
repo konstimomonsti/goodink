@@ -73,7 +73,7 @@ export function StatusPill({ status, page, exam, patterns }: { status: LiveStatu
           <LiveModePicker status={status} onDone={() => setOpen(null)} />
           {live.mode !== 'off' && (page || exam || patterns) && (
             <div className="live-pop-extra">
-              {exam?.on && exam.hidden > 0 && (
+              {exam?.on && exam.hidden !== 0 && (
                 <button
                   type="button"
                   className="btn btn-primary btn-md full live-reveal"
@@ -82,7 +82,7 @@ export function StatusPill({ status, page, exam, patterns }: { status: LiveStatu
                     setOpen(null);
                   }}
                 >
-                  <Eye size={16} /> Reveal {exam.hidden} mark{exam.hidden === 1 ? '' : 's'}
+                  <Eye size={16} /> {exam.hidden > 0 ? `Reveal ${exam.hidden} mark${exam.hidden === 1 ? '' : 's'}` : 'Reveal marks'}
                 </button>
               )}
               {page && <Toggle label="Pause checking on this page" checked={page.paused} onChange={page.onPause} />}

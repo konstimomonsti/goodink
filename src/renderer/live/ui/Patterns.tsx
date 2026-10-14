@@ -1,11 +1,12 @@
-// "Your patterns": the mistake journal. Confirmed mistakes grouped by misconception, newest example
-// first, with one tap to turn them into flashcards in Study.
+// "Your patterns": the mistake journal. Confirmed mistakes grouped by misconception (with the rule
+// to remember when the engine knows it), newest example first, and one tap to turn them into
+// flashcards in Study.
 import { useMemo, useState } from 'react';
 import { GraduationCap, Repeat2 } from 'lucide-react';
 import { Button, Modal } from '../../ui/primitives';
 import { MathHtml } from '../../ui/Math';
 import { activateTab, showSection, toast } from '../../lib/store';
-import type { JournalEntry } from './engineApi';
+import type { JournalEntry, LiveUiEngine } from './engineApi';
 import { plainToTex } from './latex';
 
 const TAGS: Record<string, string> = {
@@ -15,9 +16,9 @@ const TAGS: Record<string, string> = {
   'divide-one-side': 'Dividing only one side',
   arithmetic: 'Arithmetic slips',
 };
-export const tagLabel = (tag: string | undefined, title: string) => (tag ? (TAGS[tag] ?? tag.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase())) : title);
+export const tagLabel = (tag: string | undefined, title: string) => (tag && tag !== 'other' ? (TAGS[tag] ?? tag.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase())) : title);
 
-/** Journal of one notebook, kept on this PC. */
+/** Journal of one notebook as the UI saw it, kept on this PC (the engine keeps its own too). */
 const key = (nbId: string) => `goodink:live-journal:${nbId}`;
 export function loadJournal(nbId: string): JournalEntry[] {
   try {
@@ -34,16 +35,29 @@ export function saveJournal(nbId: string, list: JournalEntry[]) {
   }
 }
 
-export function PatternsDialog({ entries, onClose }: { entries: JournalEntry[]; onClose: () => void }) {
+type Group = { key: string; name: string; rule?: string; count: number; last: number; line?: string; fix?: string };
+
+function groupsOf(entries: JournalEntry[]): Group[] {
+  const m = new Map<string, JournalEntry[]>();
+  for (const e of [...entries].sort((a, b) => b.at - a.at)) {
+    const k = e.tag ?? e.title;
+    m.set(k, [...(m.get(k) ?? []), e]);
+  }
+  return [...m.values()]
+    .sort((a, b) => b.length - a.length || b[0].at - a[0].at)
+    .map((g) => ({ key: g[0].tag ?? g[0].title, name: tagLabel(g[0].tag, g[0].title), count: g.length, last: g[0].at, line: g.find((e) => e.line)?.line, fix: g.find((e) => e.fix)?.fix }));
+}
+
+export function PatternsDialog({ entries, engine, onClose }: { entries: JournalEntry[]; engine?: LiveUiEngine | null; onClose: () => void }) {
   const [busy, setBusy] = useState(false);
-  const groups = useMemo(() => {
-    const m = new Map<string, JournalEntry[]>();
-    for (const e of [...entries].sort((a, b) => b.at - a.at)) {
-      const k = e.tag ?? e.title;
-      m.set(k, [...(m.get(k) ?? []), e]);
-    }
-    return [...m.values()].sort((a, b) => b.length - a.length || b[0].at - a[0].at);
-  }, [entries]);
+  const groups = useMemo((): Group[] => {
+    const ps = engine?.patterns?.();
+    if (!ps?.length) return groupsOf(entries);
+    return ps.map((p) => {
+      const e = entries.find((x) => (x.tag ?? 'other') === p.misconception && x.line);
+      return { key: p.misconception, name: p.label, rule: p.rule, count: p.count, last: p.last, line: e?.line ?? p.examples[0], fix: e?.fix };
+    });
+  }, [entries, engine]);
   const cardable = entries.filter((e) => e.line);
 
   const makeCards = async () => {
@@ -53,12 +67,11 @@ export function PatternsDialog({ entries, onClose }: { entries: JournalEntry[]; 
       await study.loadStudy();
       const decks = study.useStudy.getState().data.decks;
       const deck = decks.find((d) => d.name === 'My mistakes') ?? study.createDeck('My mistakes');
+      const drafts =
+        engine?.journalCards?.() ??
+        cardable.map((e) => ({ front: `What is wrong in this step?\n$${plainToTex(e.line!)}$`, back: [`**${e.title}**`, e.detail ?? '', e.fix ? `Correct: $${e.fix}$` : ''].filter(Boolean).join('\n') }));
       let n = 0;
-      for (const e of cardable) {
-        const front = `What is wrong in this step?\n$${plainToTex(e.line!)}$`;
-        const back = [`**${e.title}**`, e.detail ?? '', e.fix ? `Correct: $${e.fix}$` : ''].filter(Boolean).join('\n');
-        n += study.addBasic(deck.id, front, back, ['mistake', ...(e.tag ? [e.tag] : [])]).length ? 1 : 0;
-      }
+      for (const c of drafts) n += study.addBasic(deck.id, c.front, c.back, ['mistake']).length ? 1 : 0;
       toast(`${n} flashcard${n === 1 ? '' : 's'} added to “My mistakes”`, {
         kind: 'success',
         action: {
@@ -88,7 +101,7 @@ export function PatternsDialog({ entries, onClose }: { entries: JournalEntry[]; 
           <Button variant="ghost" onClick={onClose}>
             Close
           </Button>
-          <Button variant="primary" disabled={!cardable.length || busy} onClick={() => void makeCards()}>
+          <Button variant="primary" disabled={!groups.length || busy} onClick={() => void makeCards()}>
             <GraduationCap size={16} /> Make flashcards
           </Button>
         </>
@@ -103,27 +116,28 @@ export function PatternsDialog({ entries, onClose }: { entries: JournalEntry[]; 
       ) : (
         <ol className="live-pattern-list">
           {groups.map((g) => (
-            <li key={g[0].tag ?? g[0].title} className="live-pattern">
+            <li key={g.key} className="live-pattern">
               <div className="live-pattern-head">
-                <span className="live-pattern-name">{tagLabel(g[0].tag, g[0].title)}</span>
-                <span className="live-pattern-count" aria-label={`${g.length} times`}>
-                  ×{g.length}
+                <span className="live-pattern-name">{g.name}</span>
+                <span className="live-pattern-count" aria-label={`${g.count} times`}>
+                  ×{g.count}
                 </span>
               </div>
-              {g[0].line && (
+              {g.rule && <p className="live-pattern-rule">{g.rule}</p>}
+              {g.line && (
                 <div className="live-pattern-ex">
-                  <MathHtml tex={plainToTex(g[0].line)} display={false} />
-                  {g[0].fix && (
+                  <MathHtml tex={plainToTex(g.line)} display={false} />
+                  {g.fix && (
                     <>
                       <span className="live-pattern-arrow" aria-label="should be">
                         →
                       </span>
-                      <MathHtml tex={g[0].fix} display={false} />
+                      <MathHtml tex={g.fix} display={false} />
                     </>
                   )}
                 </div>
               )}
-              <span className="live-pattern-when">Last {new Date(g[0].at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</span>
+              <span className="live-pattern-when">Last {new Date(g.last).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</span>
             </li>
           ))}
         </ol>

@@ -11,6 +11,8 @@ import { LIVE_TUNING as T } from './tuning';
 
 export interface GateOptions {
   off: boolean;
+  /** the engine already holds red near the pen and hides marks in exam mode */
+  engineTiming?: boolean;
   showTicks: boolean;
   underlineUnsure: boolean;
 }
@@ -100,7 +102,7 @@ export class MarkGate {
     const later = (t: number) => (nextAt = nextAt == null ? t : Math.min(nextAt, t));
     if (this.opts.off || this.paused.has(pageId)) return { decos: out, nextAt, appeared, hidden: 0 };
     const raw = this.raw.get(pageId) ?? [];
-    const hide = this.exam && !this.revealed;
+    const hide = this.exam && !this.revealed && !this.opts.engineTiming;
     let hidden = 0;
     const reds: UiDecoration[] = [];
     for (const d of [...raw].sort((a, b) => a.bbox[1] - b.bbox[1] || a.bbox[0] - b.bbox[0])) {
@@ -110,7 +112,7 @@ export class MarkGate {
           continue;
         }
         if (!this.released.has(d.id)) {
-          const t = this.holdUntil(d, pageId, now);
+          const t = this.opts.engineTiming ? 0 : this.holdUntil(d, pageId, now);
           if (t) {
             later(t);
             continue;
@@ -135,6 +137,8 @@ export class MarkGate {
         }
       } else if (!hide) out.push(d); // results and future kinds
     }
+    // the engine's priority decides which red marks show (first mistakes first)
+    reds.sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0) || a.bbox[1] - b.bbox[1]);
     out.push(...reds.slice(0, T.maxRedPerPage));
     if (reds.length > T.maxRedPerPage) {
       const first = reds[T.maxRedPerPage];

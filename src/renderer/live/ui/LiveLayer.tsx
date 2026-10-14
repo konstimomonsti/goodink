@@ -60,6 +60,8 @@ export default function LiveLayer({ vp, s, slot, bridge, pageId }: { vp: Viewpor
       setStatus(e.status());
       if (gate.exam) e.setExam?.(true);
       for (const p of gate.paused) e.pausePage?.(p, true);
+      // paused pages are remembered by the engine per notebook
+      for (const p of s.pages) if (e.isPaused?.(p.id)) gate.paused.add(p.id);
     });
     return () => {
       on = false;
@@ -112,9 +114,9 @@ export default function LiveLayer({ vp, s, slot, bridge, pageId }: { vp: Viewpor
   }, [gate, record, vp]);
 
   useEffect(() => {
-    gate.opts = { off: live.mode === 'off', showTicks: live.showTicks, underlineUnsure: live.underlineUnsure };
+    gate.opts = { off: live.mode === 'off', showTicks: live.showTicks, underlineUnsure: live.underlineUnsure, engineTiming: !!(engine?.notePenActivity && engine.reveal) };
     flush();
-  }, [gate, flush, live.mode, live.showTicks, live.underlineUnsure]);
+  }, [gate, flush, engine, live.mode, live.showTicks, live.underlineUnsure]);
 
   useEffect(
     () =>
@@ -179,11 +181,13 @@ export default function LiveLayer({ vp, s, slot, bridge, pageId }: { vp: Viewpor
     flush();
   };
   const reveal = () => {
+    engineRef.current?.reveal?.();
     gate.revealAll();
     flush();
   };
-  let hidden = 0;
-  if (gate.exam && !gate.revealed) for (const id of gate.pages()) hidden += gate.compute(id).hidden;
+  // -1: the engine holds the marks and does not say how many
+  let hidden = gate.opts.engineTiming && gate.exam && !gate.revealed ? -1 : 0;
+  if (!gate.opts.engineTiming && gate.exam && !gate.revealed) for (const id of gate.pages()) hidden += gate.compute(id).hidden;
 
   // ---- cards ----
   const closeAi = useCallback(
@@ -284,7 +288,7 @@ export default function LiveLayer({ vp, s, slot, bridge, pageId }: { vp: Viewpor
         ai.map((c) =>
           createPortal(<AiCard key={c.id} vp={vp} engine={engine} status={status} region={c.region} pinned={c.pinned} onPin={(p) => pinAi(c.id, p)} onClose={() => closeAi(c.id)} />, document.body, c.id),
         )}
-      {patterns && <PatternsDialog entries={allJournal} onClose={() => setPatterns(false)} />}
+      {patterns && <PatternsDialog entries={allJournal} engine={engine} onClose={() => setPatterns(false)} />}
       {createPortal(
         <div className="sr-only" role="status" aria-live="polite">
           {announce}
