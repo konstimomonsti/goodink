@@ -25,12 +25,16 @@ export default async ({ win, shot }) => {
   console.log('strokes after long-press:', await win.evaluate(() => window.__editor.vp.session.content(window.__editor.vp.session.pages[0].id).strokes.length));
 
   // mic
-  await win.getByRole('button', { name: 'Ask with your voice' }).click();
+  // push-to-talk: hold the mic button
+  const mb = await win.getByRole('button', { name: 'Hold to talk' }).boundingBox();
+  await win.mouse.move(mb.x + mb.width / 2, mb.y + mb.height / 2);
+  await win.mouse.down();
   await win.waitForTimeout(1400);
+  console.log('ring while listening:', await win.locator('.gi-live-mark.is-ring').count());
   const cb = await win.locator('.live-card').boundingBox();
   console.log('mic state:', await win.locator('.live-ask').getAttribute('class'));
   await crop(win, `ui-31-mic-recording${sfx}`, { x: cb.x - 20, y: cb.y + cb.height - 140, width: cb.width + 40, height: 160 });
-  await win.getByRole('button', { name: 'Stop recording' }).click();
+  await win.mouse.up();
   await win.waitForTimeout(150);
   await crop(win, `ui-32-mic-transcribing${sfx}`, { x: cb.x - 20, y: cb.y + cb.height - 140, width: cb.width + 40, height: 160 });
   await win.waitForTimeout(900);

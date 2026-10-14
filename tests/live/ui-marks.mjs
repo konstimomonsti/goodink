@@ -4,10 +4,11 @@ import { openNotebook, pageBox, writeProblem, crop, clipAround } from './ui-lib.
 
 export default async ({ win, shot }) => {
   const dark = process.env.DARK === '1';
-  const sfx = dark ? '-dark' : '';
-  await openNotebook(win, { dark });
+  const small = process.env.SMALL === '1';
+  const sfx = (dark ? '-dark' : '') + (small ? '-small' : '');
+  await openNotebook(win, { dark, ...(small ? { w: 760, h: 520 } : {}) });
   const pb = await pageBox(win);
-  const x = pb.x + 90, y = pb.y + 170;
+  const x = pb.x + (small ? 50 : 90), y = pb.y + (small ? 110 : 170);
   const lines = await writeProblem(win, x, y);
   await win.waitForTimeout(2300);
   const all = { x0: lines[0].x0, y0: lines[0].y0, x1: lines[0].x1 + 40, y1: lines[2].y1 };
@@ -50,6 +51,7 @@ export default async ({ win, shot }) => {
   // right-click the wrong line: the insight card
   const e3 = await win.locator('.gi-live-mark.is-error path').boundingBox();
   await win.mouse.click(e3.x + e3.width / 2, e3.y - 14, { button: 'right' });
+  await win.waitForTimeout(500);
   await win.locator('.live-card').waitFor();
   await win.waitForTimeout(350);
   await shot(`ui-05-card${sfx}`);

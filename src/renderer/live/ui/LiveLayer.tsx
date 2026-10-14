@@ -286,7 +286,11 @@ export default function LiveLayer({ vp, s, slot, bridge, pageId }: { vp: Viewpor
         )}
       {engine &&
         ai.map((c) =>
-          createPortal(<AiCard key={c.id} vp={vp} engine={engine} status={status} region={c.region} pinned={c.pinned} onPin={(p) => pinAi(c.id, p)} onClose={() => closeAi(c.id)} />, document.body, c.id),
+          createPortal(<AiCard key={c.id} vp={vp} engine={engine} status={status} region={c.region} pinned={c.pinned} onPin={(p) => pinAi(c.id, p)} onClose={() => closeAi(c.id)} onListening={(on) => {
+              // "why?", "this": the block under the pen or written last gets a hairline ring while listening
+              const t = on ? engine.deicticTarget?.() : null;
+              setRing(t ? t.pageId : null, t?.block.bbox);
+            }} />, document.body, c.id),
         )}
       {patterns && <PatternsDialog entries={allJournal} engine={engine} onClose={() => setPatterns(false)} />}
       {createPortal(

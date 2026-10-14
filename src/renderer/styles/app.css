@@ -1048,7 +1048,7 @@ html, body { touch-action: pan-x pan-y; }
 .live-ask-mic, .live-ask-send { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex: none; transition: background var(--m-fast), color var(--m-fast), transform var(--m-fast); }
 .live-ask-mic { color: var(--c-text-muted); }
 .live-ask-mic:hover:not(:disabled) { background: var(--c-hover); color: var(--c-text); }
-.live-ask-mic.is-on { color: var(--live-red); background: color-mix(in srgb, var(--live-red) 13%, transparent); animation: live-rec 1.5s ease-out infinite; }
+.live-ask-mic.is-on, .live-ask-mic.is-on:hover:not(:disabled) { color: var(--live-red); background: color-mix(in srgb, var(--live-red) 13%, transparent); animation: live-rec 1.5s ease-out infinite; }
 @keyframes live-rec { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--live-red) 35%, transparent); } to { box-shadow: 0 0 0 8px transparent; } }
 .live-ask-send { background: var(--c-accent); color: var(--c-on-accent); }
 .live-ask-send:disabled { opacity: 1; background: var(--c-border); color: var(--c-text-muted); }

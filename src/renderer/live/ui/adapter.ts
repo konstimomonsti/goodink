@@ -42,9 +42,7 @@ export async function createUiEngine(s: NotebookSession): Promise<LiveUiEngine> 
   try {
     const mod = await load();
     const make = mod.createUiEngine as ((s: NotebookSession) => LiveUiEngine | Promise<LiveUiEngine>) | undefined;
-    if (make) return await make(s);
-    const { adaptLiveEngine } = await import('./realAdapter');
-    return (await adaptLiveEngine(mod, s)) ?? nullEngine();
+    return make ? await make(s) : nullEngine();
   } catch (e) {
     console.warn('live engine failed to load', e);
     return nullEngine();

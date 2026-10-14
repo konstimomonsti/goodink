@@ -320,6 +320,10 @@ export class Viewport {
   private actPage = '';
   private actX = 0;
   private actY = 0;
+  private actT = 0;
+  private actOX = 0;
+  private actOY = 0;
+  private actInv: Mat = IDENTITY;
   private liveTip: HTMLDivElement | null = null;
   private liveTipId = '';
   private liveTipTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1381,6 +1385,12 @@ export class Viewport {
       this.actPage = pageId;
       this.actX = px;
       this.actY = py;
+      // cached so moves can report the pen position with plain arithmetic (no allocation)
+      const sr = this.scroller.getBoundingClientRect(), r = this.rects[i];
+      this.actInv = invert(pageMatrix(this.session.pages[i], this.zoom));
+      this.actOX = sr.left - this.scroller.scrollLeft + r.x;
+      this.actOY = sr.top - this.scroller.scrollTop + r.y;
+      this.actT = e.timeStamp;
       this.cb.onPenActivity(pageId, px, py, true);
     }
     switch (tool) {
@@ -1619,6 +1629,14 @@ export class Viewport {
 
   private onMove = (e: PointerEvent) => {
     if (e.pointerType === 'pen') this.penNearAt = performance.now();
+    if (this.actPage && e.timeStamp - this.actT >= 16 && e.pointerId === this.actionPointer) {
+      // the live check keeps red away from where the pen is busy: at most once a frame, numbers only
+      const m = this.actInv, cx = e.clientX - this.actOX, cy = e.clientY - this.actOY;
+      this.actT = e.timeStamp;
+      this.actX = m[0] * cx + m[2] * cy + m[4];
+      this.actY = m[1] * cx + m[3] * cy + m[5];
+      this.cb.onPenActivity?.(this.actPage, this.actX, this.actY, true);
+    }
     if (e.pointerType === 'touch' && this.touches.has(e.pointerId)) {
       this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this.pinch) return this.updatePinch();

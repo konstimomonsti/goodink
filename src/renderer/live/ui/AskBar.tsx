@@ -92,7 +92,7 @@ export function AskBar({ engine, onSend, onStop, busy, disabled, placeholder, au
           rows={1}
           value={q}
           disabled={disabled}
-          placeholder={recording ? 'Listening… release to stop' : mic.state === 'transcribing' ? 'Writing down what you said…' : placeholder}
+          placeholder={recording ? 'Listening…' : mic.state === 'transcribing' ? 'Writing down what you said…' : placeholder}
           aria-label={label}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {

@@ -28,7 +28,7 @@ function b64(bytes: Uint8Array) {
   return btoa(s);
 }
 
-export function AiCard({ vp, engine, status, region, pinned, onPin, onClose }: { vp: Viewport; engine: LiveUiEngine; status: LiveStatus; region: AiRegion; pinned: boolean; onPin: (p: boolean) => void; onClose: () => void }) {
+export function AiCard({ vp, engine, status, region, pinned, onPin, onClose, onListening }: { vp: Viewport; engine: LiveUiEngine; status: LiveStatus; region: AiRegion; pinned: boolean; onPin: (p: boolean) => void; onClose: () => void; onListening?: (on: boolean) => void }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [follow, setFollow] = useState<string[]>([]);
   const [moved, setMoved] = useState(false);
@@ -179,7 +179,7 @@ export function AiCard({ vp, engine, status, region, pinned, onPin, onClose }: {
       </div>
       {status.aiReady && (
         <footer className="live-card-foot">
-          <AskBar engine={engine} busy={busy} onStop={() => abort.current?.abort()} onSend={(q) => void run(q)} placeholder={msgs.length ? 'Ask a follow-up…' : 'Ask anything about it…'} label="Ask about the selection" autoFocus={!msgs.length && !matchMedia('(pointer: coarse)').matches} />
+          <AskBar engine={engine} busy={busy} onStop={() => abort.current?.abort()} onSend={(q) => void run(q)} placeholder={msgs.length ? 'Ask a follow-up…' : 'Ask anything about it…'} label="Ask about the selection" onListening={onListening} autoFocus={!msgs.length && !matchMedia('(pointer: coarse)').matches} />
         </footer>
       )}
     </div>

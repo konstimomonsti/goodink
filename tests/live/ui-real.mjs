@@ -16,7 +16,7 @@ export default async ({ win, shot }) => {
   await writeText(win, '2x=4', { x: 80, y: 160, size: 26, seed: 2 });
   await writeText(win, 'x=3', { x: 80, y: 200, size: 26, seed: 3 });
   await writeText(win, '12+5=', { x: 300, y: 120, size: 26, seed: 4 });
-  await win.waitForTimeout(3000);
+  await win.waitForTimeout(2600);
   await shot('ui-60-real-marks');
   console.log('marks:', await win.locator('.gi-live-mark').evaluateAll((m) => m.map((e) => e.getAttribute('class'))));
   console.log('pill:', await win.locator('.live-pill').getAttribute('aria-label'));
@@ -30,4 +30,21 @@ export default async ({ win, shot }) => {
   console.log('card:', !!card);
   if (card) await crop(win, 'ui-61-real-card', { x: card.x - 280, y: card.y - 20, width: card.width + 300, height: card.height + 40 });
   else await shot('ui-61-real-card');
+  await win.keyboard.press('Escape');
+  // exam mode on the real engine: marks hide, Reveal brings them back together
+  await win.locator('.live-pill').click();
+  await win.locator('.live-pop .toggle-row', { hasText: 'Exam mode' }).locator('button').click();
+  await win.keyboard.press('Escape');
+  await win.waitForTimeout(400);
+  console.log('marks in exam:', await win.locator('.gi-live-mark.is-error').count());
+  await win.locator('.live-pill').click();
+  await win.getByRole('button', { name: /^Reveal/ }).click();
+  await win.waitForTimeout(500);
+  console.log('marks after reveal:', await win.locator('.gi-live-mark.is-error').count());
+  await shot('ui-62-real-revealed');
+  await win.locator('.live-pill').click();
+  await win.getByRole('button', { name: /Your patterns/ }).click();
+  await win.locator('.live-patterns').waitFor();
+  await win.waitForTimeout(300);
+  await shot('ui-63-real-patterns');
 };
