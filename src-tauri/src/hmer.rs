@@ -284,7 +284,7 @@ fn render(strokes: &[Vec<f32>], xh: f32, pen: f32, pad: f32) -> Option<Gray> {
     if hs.is_empty() {
         return None;
     }
-    hs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    hs.sort_by(|a, b| a.total_cmp(b));
     let med = hs[hs.len() / 2].max(hs[hs.len() - 1] * 0.25).max(1e-3);
     // cap the image so a long line stays cheap to rasterise
     let sc = (xh / med).min(1600.0 / (x1 - x0 + 1e-3)).min(600.0 / (y1 - y0 + 1e-3));
@@ -472,18 +472,22 @@ fn beam_search(e: &mut Engine, m: &ModelSpec, input: Vec<f32>, beam: usize, top_
         }
         let outs = e.dec.run(inputs).map_err(|e| e.to_string())?;
         let (shape, logits) = outs[0].try_extract_tensor::<f32>().map_err(|e| e.to_string())?;
-        let vsz = shape[2] as usize;
+        let vsz = if shape.len() == 3 { shape[2] as usize } else { 0 };
+        if vsz < 2 || logits.len() < b * t * vsz {
+            return Err(format!("unexpected decoder output shape {shape:?}"));
+        }
         let mut cands: Vec<(usize, i64, f32)> = vec![];
         for (bi, (_, score)) in alive.iter().enumerate() {
             let row = &logits[(bi * t + t - 1) * vsz..(bi * t + t) * vsz];
             let lp = log_softmax_row(row);
             let mut idx: Vec<usize> = (0..vsz).collect();
-            idx.select_nth_unstable_by(2 * b, |&x, &y| lp[y].partial_cmp(&lp[x]).unwrap());
-            for &k in &idx[..2 * b] {
+            let kk = (2 * b).min(vsz - 1);
+            idx.select_nth_unstable_by(kk, |&x, &y| lp[y].total_cmp(&lp[x]));
+            for &k in &idx[..kk] {
                 cands.push((bi, k as i64, score + lp[k]));
             }
         }
-        cands.sort_by(|x, y| y.2.partial_cmp(&x.2).unwrap());
+        cands.sort_by(|x, y| y.2.total_cmp(&x.2));
         let mut next = vec![];
         for (rank, (bi, tok, s)) in cands.into_iter().enumerate() {
             if s < -1e8 || next.len() == b {
@@ -500,7 +504,7 @@ fn beam_search(e: &mut Engine, m: &ModelSpec, input: Vec<f32>, beam: usize, top_
                 next.push((ids, s));
             }
         }
-        done.sort_by(|x, y| norm(&y.0, y.1).partial_cmp(&norm(&x.0, x.1)).unwrap());
+        done.sort_by(|x, y| norm(&y.0, y.1).total_cmp(&norm(&x.0, x.1)));
         done.truncate(top_k.max(b));
         if next.is_empty() {
             break;
@@ -516,7 +520,7 @@ fn beam_search(e: &mut Engine, m: &ModelSpec, input: Vec<f32>, beam: usize, top_
         if let Some(best) = done.iter().map(|d| d.1).reduce(f32::max) {
             let top = alive.iter().map(|a| a.1).fold(f32::MIN, f32::max);
             let mut raw: Vec<f32> = done.iter().map(|d| d.1).collect();
-            raw.sort_by(|x, y| y.partial_cmp(x).unwrap());
+            raw.sort_by(|x, y| y.total_cmp(x));
             if top < best - 4.6 || (raw.len() >= top_k && top < raw[top_k - 1]) {
                 break;
             }
@@ -526,7 +530,7 @@ fn beam_search(e: &mut Engine, m: &ModelSpec, input: Vec<f32>, beam: usize, top_
         done = alive.into_iter().filter(|(_, s)| *s > -1e8).collect();
     }
     // most probable first (the shares below are probabilities, so rank by them too)
-    done.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap());
+    done.sort_by(|x, y| y.1.total_cmp(&x.1));
     // merge readings that detokenise to the same LaTeX (keep the best), then top_k
     let mut seen = std::collections::HashSet::new();
     let mut hyps: Vec<Hyp> = vec![];
@@ -644,7 +648,10 @@ fn recognize(req: HmerRequest) -> Res<HmerResult> {
 /// sessions stay loaded between calls. An empty request just loads (warms) the model.
 #[tauri::command]
 pub async fn hmer_recognize(req: HmerRequest) -> Res<HmerResult> {
-    tauri::async_runtime::spawn_blocking(move || recognize(req)).await.map_err(|e| e.to_string())?
+    // one engine behind a mutex (sessions are never used concurrently); a panic becomes an error
+    tauri::async_runtime::spawn_blocking(move || std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| recognize(req))).unwrap_or_else(|_| Err("hmer: internal error".into())))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[derive(Serialize)]
