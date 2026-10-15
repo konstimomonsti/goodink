@@ -156,7 +156,8 @@ export function linesToJudge(mode: LiveMode, rec: BlockRecognition, local: Local
       continue;
     }
     if (l.kind !== 'math') continue;
-    if (!POLICY.smartOnlyUndecided || v === 'unsure' || v === 'none' || v === 'pending' || (v === 'error' && l.confidence < POLICY.confidentReading)) out.push(l);
+    const shaky = l.confidence < POLICY.confidentReading;
+    if (!POLICY.smartOnlyUndecided || v === 'unsure' || v === 'none' || v === 'pending' || (v === 'error' && shaky) || (v === 'ok' && shaky && POLICY.smartEscalateShakyReading)) out.push(l);
   }
   return out;
 }
@@ -773,7 +774,7 @@ export class LiveEngine {
     this.lastLocalMs = Math.round(localMs);
     await this.ai.whenReady();
     const mode = this.mode;
-    const tier: Tier = mode === 'max' ? 'strong' : 'fast';
+    const tier: Tier = mode === 'max' ? 'strong' : POLICY.smartTier;
 
     // per line: what to judge, and what the cache already knows
     const judge = linesToJudge(mode, rec, local);

@@ -464,7 +464,9 @@ test('mode gating and geometry helpers', () => {
   assert.equal(needsAi('local', rec('math'), loc('unsure')), false);
   assert.equal(needsAi('off', rec('math'), loc('unsure')), false);
   assert.equal(needsAi('smart', rec('math'), loc('unsure')), true);
-  assert.equal(needsAi('smart', rec('math'), loc('ok')), false);
+  assert.equal(needsAi('smart', rec('math'), loc('ok')), false, 'a confidently read, correct step stays on this PC');
+  assert.equal(needsAi('smart', rec('math', 0.6), loc('ok')), true, 'not sure of the reading: the cloud reads and judges it');
+  assert.equal(needsAi('local', rec('math', 0.6), loc('ok')), false, 'Local never calls the cloud');
   assert.equal(needsAi('smart', rec('text'), loc('none')), false);
   assert.equal(needsAi('smart', rec('math', 0.5), loc('error')), true);
   assert.equal(needsAi('smart', rec('math', 0.95), loc('error')), false);

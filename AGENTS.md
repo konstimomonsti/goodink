@@ -90,6 +90,13 @@ Docs: `docs/live-ink/SPEC.md` (what and why), `ARCHITECTURE.md` (binding decisio
 the spec), `RESEARCH-recognition.md`, `RESEARCH-ux.md`. Shared types:
 `src/renderer/live/contract.ts`. Change the contract only additively, and note the change in the docs.
 
+**Owner priorities (2026-10-16, binding; see ARCHITECTURE §E)**:
+- First goal: follow the learner's math notes (read the ink and check the steps quietly).
+- On-device when sure. When not fully sure (the CAS is undecided or the reading is shaky), Smart
+  sends the line to the **better (strong) cloud model**, which is slower.
+- The tutor opens only when asked: "Ask by voice" (push-to-talk), the AI selector, or
+  right-click/long-press on ink. It never pops up or listens on its own.
+
 **What it does**:
 - recognises handwriting and handwritten formulas live, on-device first;
 - checks each math step against the one before;

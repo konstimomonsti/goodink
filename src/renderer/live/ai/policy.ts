@@ -50,6 +50,11 @@ export const POLICY = {
   showUnconfirmedAsAmber: true,
   /** Smart judges a line only when the CAS left it undecided (or a shaky local error) */
   smartOnlyUndecided: true,
+  /** ... or when this PC is not sure it read the line right, even if the CAS found it correct:
+   *  a misread can hide a real mistake (owner's rule: on-device when sure, else the cloud) */
+  smartEscalateShakyReading: true,
+  /** the model Smart escalates to: the better, slower one (the owner asked for the better model) */
+  smartTier: 'strong' as Tier,
   /** ink older than this session is judged by AI only when the learner opens its card */
   aiOnlyForFreshInk: true,
   /** only the first error of a block is marked red; later ones are in the card */

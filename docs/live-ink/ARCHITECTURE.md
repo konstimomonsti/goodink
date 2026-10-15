@@ -113,3 +113,27 @@ Coverage is defined in `docs/live-ink/MATH-COVERAGE.md` and measured with the co
 4. **Proofs and anything undecidable go to the AI judge.** Examples are ε-δ arguments, induction
    steps, quantifier logic and abstract algebra. A local verdict there is 'none'. Red needs the AI
    judge plus an independent re-solve. Otherwise the verdict is amber or nothing.
+
+## E. Owner priorities (2026-10-16): follow the notes; the tutor only on request
+
+These override earlier sections where they differ.
+
+1. **The first goal is following the learner's math notes:** reading the ink and checking the
+   steps, quietly, while they write.
+2. **On-device when sure; the better cloud model when not.**
+   - Simple calculations are read and checked on this PC, instantly.
+   - In Smart mode, a line goes to the cloud when this PC is not fully sure: the CAS left it
+     undecided, or the reading itself is shaky (confidence < 0.9), even if the CAS found the step
+     correct. A misread can hide a real mistake.
+   - The escalation uses the **strong** model tier (`POLICY.smartTier`). It is slower and costs
+     more per call, but it runs only on uncertain lines.
+   - The cloud may correct the reading (`reading_ok` / `corrected`) as well as judge the step. A
+     confident local reading stays the source of truth.
+   - Local mode never calls the cloud.
+3. **The tutor never runs on its own.** It opens only when the learner asks:
+   - by voice: the toolbar "Ask by voice" push-to-talk button (`live/ui/VoiceAsk.tsx`);
+   - with the AI selector (circle a region);
+   - by right-click or long-press on their own ink.
+
+   Nothing pops up, speaks or listens unprompted, and there is no open microphone. Marks (red,
+   amber, ticks, live results) are part of following the notes, not the tutor, and stay automatic.
