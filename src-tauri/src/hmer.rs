@@ -485,23 +485,23 @@ fn beam_search(e: &mut Engine, m: &ModelSpec, input: Vec<f32>, beam: usize, top_
         }
         cands.sort_by(|x, y| y.2.partial_cmp(&x.2).unwrap());
         let mut next = vec![];
-        for (bi, tok, s) in cands {
-            if s < -1e8 {
-                continue;
+        for (rank, (bi, tok, s)) in cands.into_iter().enumerate() {
+            if s < -1e8 || next.len() == b {
+                break;
             }
             let mut ids = alive[bi].0.clone();
             if tok == m.eos {
-                if done.len() < top_k.max(b) {
+                // as in HF: an ending counts only when it ranks among the best `b` candidates
+                if rank < b {
                     done.push((ids, s));
                 }
-            } else if next.len() < b {
+            } else {
                 ids.push(tok);
                 next.push((ids, s));
             }
-            if next.len() == b && done.len() >= top_k.max(b) {
-                break;
-            }
         }
+        done.sort_by(|x, y| norm(&y.0, y.1).partial_cmp(&norm(&x.0, x.1)).unwrap());
+        done.truncate(top_k.max(b));
         if next.is_empty() {
             break;
         }
@@ -511,12 +511,13 @@ fn beam_search(e: &mut Engine, m: &ModelSpec, input: Vec<f32>, beam: usize, top_
             next.push(pad);
         }
         alive = next;
-        // stop once no alive beam can beat the worst finished one (scores only fall)
-        if done.len() >= top_k.max(1) {
-            let mut fin: Vec<f32> = done.iter().map(|(v, s)| norm(v, *s)).collect();
-            fin.sort_by(|a, b| b.partial_cmp(a).unwrap());
-            let worst = fin[top_k.max(1) - 1];
-            if alive.iter().all(|(v, s)| s / (v.len() as f32 + 1.0) < worst || *s < -1e8) {
+        // scores only fall: stop once every alive beam is < 1% as likely as the best finished one,
+        // or once the top_k are finished and no alive beam can still overtake the last of them
+        if let Some(best) = done.iter().map(|d| d.1).reduce(f32::max) {
+            let top = alive.iter().map(|a| a.1).fold(f32::MIN, f32::max);
+            let mut raw: Vec<f32> = done.iter().map(|d| d.1).collect();
+            raw.sort_by(|x, y| y.partial_cmp(x).unwrap());
+            if top < best - 4.6 || (raw.len() >= top_k && top < raw[top_k - 1]) {
                 break;
             }
         }
@@ -524,7 +525,8 @@ fn beam_search(e: &mut Engine, m: &ModelSpec, input: Vec<f32>, beam: usize, top_
     if done.is_empty() {
         done = alive.into_iter().filter(|(_, s)| *s > -1e8).collect();
     }
-    done.sort_by(|x, y| norm(&y.0, y.1).partial_cmp(&norm(&x.0, x.1)).unwrap());
+    // most probable first (the shares below are probabilities, so rank by them too)
+    done.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap());
     // merge readings that detokenise to the same LaTeX (keep the best), then top_k
     let mut seen = std::collections::HashSet::new();
     let mut hyps: Vec<Hyp> = vec![];

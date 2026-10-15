@@ -4,7 +4,8 @@
 //!
 //! Note: Windows' free-text dictation grammar is served by Microsoft's online speech service, so it
 //! needs "Online speech recognition" on (Settings > Privacy & security > Speech). Without it,
-//! starting fails with a clear message and the UI falls back to the AI provider's transcription.
+//! starting fails at once with a clear message (we read the privacy switch first; the recogniser
+//! itself takes ~9 s to give up) and the UI falls back to the AI provider's transcription.
 
 #[cfg(windows)]
 mod imp {
@@ -38,8 +39,31 @@ mod imp {
         }
     }
 
+    /// The "Online speech recognition" privacy switch; without it dictation fails only after ~9 s.
+    fn online_speech_allowed() -> bool {
+        use windows::core::w;
+        use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+        let mut value: u32 = 0;
+        let mut size = std::mem::size_of::<u32>() as u32;
+        let ok = unsafe {
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                w!(r"Software\Microsoft\Speech_OneCore\Settings\OnlineSpeechPrivacy"),
+                w!("HasAccepted"),
+                RRF_RT_REG_DWORD,
+                None,
+                Some(&mut value as *mut u32 as *mut _),
+                Some(&mut size),
+            )
+        };
+        ok.is_ok() && value == 1
+    }
+
     pub fn start(app: AppHandle) -> Result<(), String> {
         stop_inner();
+        if !online_speech_allowed() {
+            return Err(explain(&windows::core::Error::new(windows::core::HRESULT(0x80045509u32 as i32), "privacy")));
+        }
         unsafe {
             let _ = RoInitialize(RO_INIT_MULTITHREADED);
         }
