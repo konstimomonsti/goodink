@@ -2876,7 +2876,7 @@ export class Viewport {
     v.liveZoom = this.zoom;
     v.livePage = v.page;
     const pageId = v.page.id;
-    renderDecorations(v.live, decos, { m: pageMatrix(v.page, this.zoom), zoom: this.zoom, colorAt: (b) => this.inkColorAt(pageId, b) }, this.liveSeen, animate && !this.reducedMotion?.matches);
+    renderDecorations(v.live, decos, { m: pageMatrix(v.page, this.zoom), zoom: this.zoom, colorAt: (b) => this.inkColorAt(pageId, b), widthAt: (b) => this.inkWidthAt(pageId, b), badgeAt: (b) => this.badgeAt(pageId, b) }, this.liveSeen, animate && !this.reducedMotion?.matches);
   }
 
   /** Pen colour of the ink under a page box (ghost-ink results are drawn in it). */
@@ -2887,6 +2887,48 @@ export class Viewport {
     let best = this.tools.penColor, n = 0;
     for (const [col, k] of counts) if (k > n) [best, n] = [col, k];
     return best;
+  }
+
+  /** Median stroke width of the pen ink under a box (page units). */
+  private inkWidthAt(pageId: string, b: BBox): number {
+    const ws: number[] = [];
+    for (const s of this.session.content(pageId)?.strokes ?? []) if (s.kind === 'pen' && bboxOverlap(s.bbox, b)) ws.push(s.width);
+    ws.sort((x, y) => x - y);
+    return ws.length ? ws[ws.length >> 1] : this.tools.penWidth;
+  }
+
+  /**
+   * Where a "+n" badge goes for a hidden mark: 14 px left of where its own line starts (walking left
+   * through strokes of that line until a gap), moved up a line if it would come within 6 px of ink.
+   */
+  private badgeAt(pageId: string, b: BBox): [number, number] {
+    const strokes = (this.session.content(pageId)?.strokes ?? []).filter((s) => s.kind === 'pen');
+    const h = Math.max(4, b[3] - b[1]);
+    const line = strokes.filter((s) => Math.min(s.bbox[3], b[3]) - Math.max(s.bbox[1], b[1]) > Math.min(h, s.bbox[3] - s.bbox[1]) * 0.4);
+    let left = b[0];
+    for (let changed = true; changed; ) {
+      changed = false;
+      for (const s of line)
+        if (s.bbox[0] < left && s.bbox[2] >= left - h * 1.2) {
+          left = s.bbox[0];
+          changed = true;
+        }
+    }
+    const z = this.zoom;
+    let x = left - 14 / z, y = (b[1] + b[3]) / 2;
+    const r = (8 + 6) / z;
+    for (let k = 0; k < 3 && strokes.some((s) => s.bbox[0] < x + r && s.bbox[2] > x - r && s.bbox[1] < y + r && s.bbox[3] > y - r); k++) {
+      y -= h;
+      x -= 4 / z;
+    }
+    return [x, y];
+  }
+
+  /** The page area on screen (page units), for "at most 3 red marks per screen". */
+  visiblePageBox(pageId: string): BBox | null {
+    const i = this.session.pageIndex(pageId);
+    const r = i >= 0 ? this.visiblePageRect(i, 0) : null;
+    return r ? [r.x, r.y, r.x + r.w, r.y + r.h] : null;
   }
 
   /** Mouse or pen hovering over a mark: a small tip with the issue title. */

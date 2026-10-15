@@ -29,6 +29,8 @@ export class MarkGate {
   private pen = { pageId: '', x: 0, y: 0, down: false, upAt: -1e9 };
   readonly paused = new Set<string>();
   exam = false;
+  /** an edited reading must never look like a fixed step: no celebration until then */
+  noFixUntil = 0;
   revealed = false;
   ring: { pageId: string; bbox: BBox } | null = null;
   opts: GateOptions = { off: false, showTicks: false, underlineUnsure: true };
@@ -63,7 +65,7 @@ export class MarkGate {
     for (const d of decos) {
       if (d.kind !== 'ok' || had.has(d.id)) continue;
       const k = this.recentErr.findIndex((r) => r.pageId === pageId && vOverlap(r.bbox, d.bbox));
-      if (k >= 0) {
+      if (k >= 0 && now >= this.noFixUntil) {
         // an error on this line just turned into a correct step: the one small celebration
         this.recentErr.splice(k, 1);
         this.fixed.set(`fix:${d.id}`, { d: { ...d, id: `fix:${d.id}`, kind: 'fixed' }, until: now + T.fixedMs + 80 });
@@ -94,7 +96,7 @@ export class MarkGate {
   }
 
   /** What to draw on a page now, when to look again, and red marks that just appeared. */
-  compute(pageId: string): { decos: UiDecoration[]; nextAt: number | null; appeared: UiDecoration[]; hidden: number } {
+  compute(pageId: string, visible?: BBox | null): { decos: UiDecoration[]; nextAt: number | null; appeared: UiDecoration[]; hidden: number } {
     const now = this.now();
     const out: UiDecoration[] = [];
     const appeared: UiDecoration[] = [];
@@ -138,13 +140,18 @@ export class MarkGate {
       } else if (!hide) out.push(d); // results and future kinds
     }
     // the engine's priority decides which red marks show (first mistakes first)
-    reds.sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0) || a.bbox[1] - b.bbox[1]);
-    out.push(...reds.slice(0, T.maxRedPerPage));
-    if (reds.length > T.maxRedPerPage) {
-      const first = reds[T.maxRedPerPage];
-      // in the margin left of the writing, level with the first mark that is not shown
-      const left = Math.min(...reds.map((r) => r.bbox[0])) - Math.max(10, (first.bbox[3] - first.bbox[1]) * 0.6);
-      out.push({ ...first, underline: { ...first.underline, x1: left, x2: left }, id: `more:${pageId}`, kind: 'more', text: `+${reds.length - T.maxRedPerPage}`, title: `${reds.length - T.maxRedPerPage} more` });
+    // at most 3 red marks per screen, chosen in reading order (top to bottom), so the first mistake
+    // is never the one folded away; marks off screen are drawn as they are (nobody sees them yet)
+    const view = visible ?? null;
+    const onScreen = (d: UiDecoration) => !view || (d.bbox[2] > view[0] && d.bbox[0] < view[2] && d.bbox[3] > view[1] && d.bbox[1] < view[3]);
+    reds.sort((a, b) => a.bbox[1] - b.bbox[1] || a.bbox[0] - b.bbox[0] || (a.priority ?? 0) - (b.priority ?? 0));
+    const seen = reds.filter(onScreen);
+    out.push(...reds.filter((d) => !onScreen(d)), ...seen.slice(0, T.maxRedPerPage));
+    if (seen.length > T.maxRedPerPage) {
+      const first = seen[T.maxRedPerPage];
+      const n = seen.length - T.maxRedPerPage;
+      // drawn at the start of the hidden mark's own line (the viewport keeps it clear of ink)
+      out.push({ ...first, id: `more:${pageId}`, kind: 'more', text: `+${n}`, title: `${n} more possible mistake${n === 1 ? '' : 's'}` });
     }
     for (const [id, f] of this.fixed) {
       if (f.d.pageId !== pageId) continue;

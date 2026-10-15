@@ -22,12 +22,14 @@ export const LIVE_TUNING = {
   fixUnlockMs: 10_000, // "Show fix" unlocks after one hint or this long
   deicticMs: 10_000, // "why?" refers to the block written within this long
 
-  // ---- red wave: 1.5 px at 100%, scaled with zoom ----
-  wave: { widthAt100: 1.5, widthMin: 1, widthMax: 4, ampPerLineH: 0.07, ampMin: 1.5, ampMax: 3.6, lambdaPerAmp: 3.6, lambdaMin: 6, lambdaMax: 13, ampJitter: 0.32, drift: 0.22 },
+  // ---- underline placement (all marks): clear of the ink, a little wider than the tokens ----
+  under: { gapPx: 3, gapPerLineH: 0.12, padPx: 3, minPx: 14, minPerLineH: 0.8 },
+  // ---- red wave: 1.5 px at 100%, scaled with zoom; 100% opacity (contrast ≥ 3:1 wins) ----
+  wave: { widthAt100: 1.5, widthMin: 1.2, widthMax: 3.5, ampAt100: 1.75, ampMin: 1.5, ampMax: 3.5, lambdaAt100: 6, minPeriods: 3, ampJitter: 0.22, drift: 0.18 },
   drawMs: 250, // draw-in, once
-  // ---- amber dots: 55% opacity, scaled by confidence ----
-  dots: { widthAt100: 1.6, widthMin: 1.2, widthMax: 3.6, gapPerWidth: 2.4, opacity: 0.55, minOpacityFactor: 0.55 },
-  // ---- tick: ≤ 10 px, 40% ----
+  // ---- amber dots: #B26B00 at 90%, confidence in the spacing (gap 2.4 → 3.6 × width) ----
+  dots: { widthAt100: 1.6, widthMin: 1.3, widthMax: 3.6, gapMin: 2.4, gapMax: 3.6 },
+  // ---- tick: ≤ 10 px, #1E8A50 at 70% ----
   tick: { sizePerLineH: 0.3, sizeMin: 6, sizeMax: 10, widthAt100: 1.4, opacity: 0.4 },
   // ---- ghost-ink results ----
   result: { opacity: 0.42, heightPerLineH: 0.78, gapPerLineH: 0.28, widthPerLineH: 0.075 },

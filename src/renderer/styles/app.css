@@ -920,13 +920,13 @@ html, body { touch-action: pan-x pan-y; }
 [data-tool='ai'] .gi-scroller { cursor: crosshair; }
 
 /* marks on the page (SVG, drawn for the zoom on screen) */
-.gi-live { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; transform-origin: 0 0; --mk-err: #e5484d; --mk-unsure: #d38c00; --mk-ok: #2c9d5f; --mk-ring: #2f5b8a; }
-.gi-live.is-dark-paper { --mk-err: #ff6369; --mk-unsure: #f2c25b; --mk-ok: #7fd6a2; --mk-ring: #9dbbdb; }
+.gi-live { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; transform-origin: 0 0; --mk-err: #e5484d; --mk-err-text: #c2373c; --mk-unsure: #b26b00; --mk-ok: #1e8a50; --mk-ring: #2f5b8a; --mk-paper: #fff; }
+.gi-live.is-dark-paper { --mk-err: #ff6369; --mk-err-text: #ff8a8f; --mk-unsure: #f2c25b; --mk-ok: #7fd6a2; --mk-ring: #9dbbdb; --mk-paper: #1f2228; }
 .gi-live-mark { outline: none; }
 .gi-live-mark path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.gi-live-mark.is-error path { stroke: var(--mk-err); opacity: .7; }
-.gi-live-mark.is-unsure path { stroke: var(--mk-unsure); opacity: var(--mk-o, .55); }
-.gi-live-mark.is-ok path, .gi-live-mark.is-fixed path { stroke: var(--mk-ok); opacity: .4; }
+.gi-live-mark.is-error path { stroke: var(--mk-err); }
+.gi-live-mark.is-unsure path { stroke: var(--mk-unsure); opacity: .9; }
+.gi-live-mark.is-ok path, .gi-live-mark.is-fixed path { stroke: var(--mk-ok); opacity: .7; }
 .gi-live-mark.is-fixed path { opacity: 0; animation: gi-live-fixed 600ms var(--m-ease) both; }
 @keyframes gi-live-fixed { 30% { opacity: .85; } to { opacity: 0; } }
 .gi-live-mark.is-error.is-new path { stroke-dasharray: 1 1; animation: gi-live-draw 250ms cubic-bezier(.2, .7, .3, 1) both; }
@@ -935,11 +935,11 @@ html, body { touch-action: pan-x pan-y; }
 .gi-live-mark.is-ok.is-new { animation: fade var(--m-slow) var(--m-ease) both; }
 .gi-live-mark.is-ok.is-transient path { animation: gi-live-tick-out 600ms ease 4s both; }
 @keyframes gi-live-tick-out { to { opacity: 0; } }
-.gi-live-mark.is-result path { stroke: var(--mk-ink, #1b1b1f); opacity: .42; }
-.gi-live-mark.is-result text { fill: var(--mk-ink, #1b1b1f); opacity: .42; font-family: 'Segoe Print', 'Bradley Hand', cursive; }
+.gi-live-mark.is-result path { stroke: var(--mk-ink, #1b1b1f); opacity: .55; }
+.gi-live-mark.is-result text { fill: var(--mk-ink, #1b1b1f); opacity: .55; font-family: 'Segoe Print', 'Bradley Hand', cursive; }
 .gi-live-mark.is-result.is-new path { stroke-dasharray: 1 1; animation: gi-live-draw 420ms ease-out both; }
-.gi-live-mark.is-more circle { fill: var(--mk-err); opacity: .85; }
-.gi-live-mark.is-more text { fill: #fff; font: 700 10px/1 var(--font-sans); text-anchor: middle; dominant-baseline: central; }
+.gi-live-mark.is-more circle { fill: var(--mk-paper); stroke: var(--mk-err); stroke-width: 1.5; }
+.gi-live-mark.is-more text { fill: var(--mk-err-text); font: 600 11px/1 var(--font-sans); text-anchor: middle; dominant-baseline: central; }
 .gi-live-mark.is-ring rect { fill: none; stroke: var(--mk-ring); stroke-width: 1; opacity: .8; animation: fade var(--m-base) var(--m-ease) both; }
 .gi-live-focus { fill: color-mix(in srgb, var(--mk-ring) 6%, transparent); stroke: var(--mk-ring); stroke-width: 1.5; opacity: 0; transition: opacity var(--m-fast); }
 .gi-live-mark:focus-visible .gi-live-focus { opacity: 1; }

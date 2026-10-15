@@ -34,23 +34,40 @@ function rng(seed: string) {
 
 const f = (n: number) => (Math.round(n * 100) / 100).toString();
 
-/** Screen geometry of a mark: start/end of the underline in CSS px, unit direction, normal, line height. */
+/**
+ * Screen geometry of a mark (CSS px): it runs under the marked tokens, clear of their lowest ink by
+ * max(3 px, 0.12 line height), 3 px past each side and never shorter than max(14 px, 0.8 line height).
+ */
 function geom(d: UiDecoration, m: Mat, zoom: number) {
-  let [ax, ay] = apply(m, d.underline.x1, d.underline.y);
-  let [bx, by] = apply(m, d.underline.x2, d.underline.y);
-  let len = Math.hypot(bx - ax, by - ay);
-  const ux = len > 0.01 ? (bx - ax) / len : 1, uy = len > 0.01 ? (by - ay) / len : 0;
-  if (len < T.minMarkPx) {
-    // a mark under a single thin symbol still gets a readable width
-    const grow = (T.minMarkPx - len) / 2;
-    ax -= ux * grow;
-    ay -= uy * grow;
-    bx += ux * grow;
-    by += uy * grow;
-    len = T.minMarkPx;
+  const U = T.under;
+  const [ux0, uy0] = apply(m, d.underline.x1, d.underline.y);
+  const [ux1, uy1] = apply(m, d.underline.x2, d.underline.y);
+  const l0 = Math.hypot(ux1 - ux0, uy1 - uy0);
+  const ux = l0 > 0.01 ? (ux1 - ux0) / l0 : 1, uy = l0 > 0.01 ? (uy1 - uy0) / l0 : 0;
+  const nx = -uy, ny = ux;
+  const lineH = Math.max(8, (d.bbox[3] - d.bbox[1]) * zoom);
+  // the token box in the line's frame: along = ux/uy, across = nx/ny (down)
+  const c = [apply(m, d.bbox[0], d.bbox[1]), apply(m, d.bbox[2], d.bbox[1]), apply(m, d.bbox[2], d.bbox[3]), apply(m, d.bbox[0], d.bbox[3])];
+  let a0 = Infinity, a1 = -Infinity, low = -Infinity;
+  for (const [x, y] of c) {
+    const along = (x - ux0) * ux + (y - uy0) * uy, across = (x - ux0) * nx + (y - uy0) * ny;
+    a0 = Math.min(a0, along);
+    a1 = Math.max(a1, along);
+    low = Math.max(low, across);
   }
-  const lineH = Math.max(6, (d.bbox[3] - d.bbox[1]) * zoom);
-  return { ax, ay, bx, by, len, ux, uy, nx: -uy, ny: ux, lineH };
+  // the engine's underline span if it is wider than the token box
+  a0 = Math.min(a0, 0) - U.padPx;
+  a1 = Math.max(a1, l0) + U.padPx;
+  const minLen = Math.max(U.minPx, U.minPerLineH * lineH);
+  if (a1 - a0 < minLen) {
+    const grow = (minLen - (a1 - a0)) / 2;
+    a0 -= grow;
+    a1 += grow;
+  }
+  const off = Math.max(0, low + Math.max(U.gapPx, U.gapPerLineH * lineH));
+  const ax = ux0 + ux * a0 + nx * off, ay = uy0 + uy * a0 + ny * off;
+  const len = a1 - a0;
+  return { ax, ay, bx: ax + ux * len, by: ay + uy * len, len, ux, uy, nx, ny, lineH };
 }
 
 /** Soft wave: amplitude breathes a little along the line, ends taper, baseline drifts a hair. */
@@ -58,9 +75,10 @@ export function wavePath(d: UiDecoration, m: Mat, zoom: number) {
   const W = T.wave;
   const g = geom(d, m, zoom);
   const r = rng(d.id);
-  const A0 = clamp(g.lineH * W.ampPerLineH, W.ampMin, W.ampMax);
-  const lambda = clamp(A0 * W.lambdaPerAmp, W.lambdaMin, W.lambdaMax);
-  const halves = Math.max(2, Math.round(g.len / (lambda / 2)));
+  // amplitude 1.75 px and wavelength 6 px at 100%, with at least three full periods
+  const A0 = clamp(W.ampAt100 * zoom, W.ampMin, W.ampMax);
+  const lambda = Math.max(A0 * 2.4, Math.min(W.lambdaAt100 * zoom, g.len / W.minPeriods));
+  const halves = Math.max(W.minPeriods * 2, Math.round(g.len / (lambda / 2)));
   const step = g.len / halves;
   const phase = r() * Math.PI * 2;
   const drift = (t: number) => A0 * W.drift * Math.sin(t * Math.PI * 1.3 + phase);
@@ -84,7 +102,9 @@ export function dottedPath(d: UiDecoration, m: Mat, zoom: number) {
   const g = geom(d, m, zoom);
   const D = T.dots;
   const width = clamp(D.widthAt100 * zoom, D.widthMin, D.widthMax);
-  return { d: `M${f(g.ax)} ${f(g.ay)} L${f(g.bx)} ${f(g.by)}`, width, gap: width * D.gapPerWidth };
+  // confidence is in the spacing, not the opacity: surer = denser dots
+  const conf = clamp(d.confidence ?? 1, 0, 1);
+  return { d: `M${f(g.ax)} ${f(g.ay)} L${f(g.bx)} ${f(g.by)}`, width, gap: width * (D.gapMin + (D.gapMax - D.gapMin) * (1 - conf)) };
 }
 
 export function tickPath(d: UiDecoration, m: Mat, zoom: number) {
@@ -103,8 +123,11 @@ export interface PaintCtx {
   m: Mat;
   zoom: number;
   isNew: boolean;
-  /** pen colour of the ink under a box (ghost-ink results are written in it) */
+  /** pen colour and median stroke width (page units) of the ink under a box: ghost ink matches it */
   colorAt: (bbox: UiDecoration['bbox']) => string;
+  widthAt: (bbox: UiDecoration['bbox']) => number;
+  /** where a "+n" badge can sit next to a line without touching any ink (page units) */
+  badgeAt: (bbox: UiDecoration['bbox']) => [number, number];
 }
 
 export type MarkPainter = (g: SVGGElement, d: UiDecoration, c: PaintCtx) => void;
@@ -118,32 +141,33 @@ const path = (g: SVGGElement, d: string, width: number, cls?: string) => {
   return p;
 };
 
-/** Hairline focus ring around a mark's ink (shown when the mark has keyboard focus). */
-function focusRing(g: SVGGElement, d: UiDecoration, m: Mat) {
+/** Hairline focus ring around a mark's ink and its underline (shown with keyboard focus). */
+function focusRing(g: SVGGElement, d: UiDecoration, m: Mat, zoom: number) {
   const c = [apply(m, d.bbox[0], d.bbox[1]), apply(m, d.bbox[2], d.bbox[3])];
-  const x = Math.min(c[0][0], c[1][0]) - 5, y = Math.min(c[0][1], c[1][1]) - 5;
+  const w = geom(d, m, zoom);
+  const amp = clamp(T.wave.ampAt100 * zoom, T.wave.ampMin, T.wave.ampMax);
+  const x0 = Math.min(c[0][0], c[1][0], w.ax, w.bx) - 5, y0 = Math.min(c[0][1], c[1][1]) - 5;
+  const x1 = Math.max(c[0][0], c[1][0], w.ax, w.bx) + 5, y1 = Math.max(c[0][1], c[1][1], w.ay + amp, w.by + amp) + 4;
   const r = document.createElementNS(NS, 'rect');
   r.setAttribute('class', 'gi-live-focus');
-  r.setAttribute('x', f(x));
-  r.setAttribute('y', f(y));
-  r.setAttribute('width', f(Math.abs(c[1][0] - c[0][0]) + 10));
-  r.setAttribute('height', f(Math.abs(c[1][1] - c[0][1]) + 14));
+  r.setAttribute('x', f(x0));
+  r.setAttribute('y', f(y0));
+  r.setAttribute('width', f(x1 - x0));
+  r.setAttribute('height', f(y1 - y0));
   r.setAttribute('rx', '6');
   g.append(r);
 }
 
 export const MARK_PAINTERS: Record<string, MarkPainter> = {
   error: (g, d, c) => {
-    focusRing(g, d, c.m);
+    focusRing(g, d, c.m, c.zoom);
     const w = wavePath(d, c.m, c.zoom);
     path(g, w.d, w.width).setAttribute('pathLength', '1');
   },
   unsure: (g, d, c) => {
-    focusRing(g, d, c.m);
+    focusRing(g, d, c.m, c.zoom);
     const w = dottedPath(d, c.m, c.zoom);
     path(g, w.d, w.width).setAttribute('stroke-dasharray', `0 ${f(w.gap)}`);
-    const conf = clamp(d.confidence ?? 1, 0, 1);
-    g.style.setProperty('--mk-o', f(T.dots.opacity * (T.dots.minOpacityFactor + (1 - T.dots.minOpacityFactor) * conf)));
   },
   ok: (g, d, c) => {
     const w = tickPath(d, c.m, c.zoom);
@@ -165,7 +189,8 @@ export const MARK_PAINTERS: Record<string, MarkPainter> = {
     g.style.setProperty('--mk-ink', color);
     if (ghostable(text)) {
       const gp = ghostPaths(text, h, seedOf(d.id), (x, y) => apply(c.m, ox + x, oy + y));
-      const p = path(g, gp.d, clamp(lineH * R.widthPerLineH * c.zoom, 1.2, 4.5));
+      // drawn with the writer's own stroke width, so it reads as ink, not as a font
+      const p = path(g, gp.d, clamp(c.widthAt(d.bbox) * c.zoom, 1, 6));
       p.setAttribute('pathLength', '1');
     } else {
       const [x, y] = apply(c.m, ox, oy);
@@ -178,16 +203,16 @@ export const MARK_PAINTERS: Record<string, MarkPainter> = {
     }
   },
   more: (g, d, c) => {
-    // a small red badge in the margin, level with the first hidden mark
-    const [x, y] = apply(c.m, d.underline.x1, (d.bbox[1] + d.bbox[3]) / 2);
-    const cx = Math.max(12, x);
+    // an outlined margin note at the start of the hidden mark's own line, clear of all ink
+    const [bx, by] = c.badgeAt(d.bbox);
+    const [x, y] = apply(c.m, bx, by);
     const circle = document.createElementNS(NS, 'circle');
-    circle.setAttribute('cx', f(cx));
+    circle.setAttribute('cx', f(x));
     circle.setAttribute('cy', f(y));
-    circle.setAttribute('r', '9');
+    circle.setAttribute('r', '8');
     g.append(circle);
     const t = document.createElementNS(NS, 'text');
-    t.setAttribute('x', f(cx));
+    t.setAttribute('x', f(x));
     t.setAttribute('y', f(y));
     t.textContent = d.text ?? '';
     g.append(t);

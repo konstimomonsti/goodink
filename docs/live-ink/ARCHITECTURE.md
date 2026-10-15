@@ -44,11 +44,15 @@ pen settles (600 ms) → groupInk (<2 ms)
   - Erasing or editing removes marks within one frame. A fixed step gets a 600 ms green tick fade,
     the only celebration.
 - **Marks**:
-  - Red is wavy: 1.5 px at 100%, scaled with zoom, #E5484D light / #FF6369 dark, 70% opacity,
-    250 ms ease-out draw-in, played once.
-  - Amber is dotted at 55% opacity. Its opacity scales with confidence, and hovering says "70% sure:
-    I read 5 as S?".
-  - The green tick is ≤ 10 px at 40% opacity and fades out after 4 s unless "show ticks" is on.
+  - Red is wavy: 1.5 px at 100%, scaled with zoom, #E5484D light / #FF6369 dark, at **100% opacity**
+    (the ≥ 3:1 contrast rule wins over the earlier 70%: #E5484D on white is 3.9:1), 250 ms ease-out
+    draw-in, played once. Amplitude 1.75 px and wavelength 6 px at 100% (at least 3 periods). It sits
+    max(3 px, 0.12 × line height) below the lowest ink of the marked tokens and runs 3 px past each
+    side, at least max(14 px, 0.8 × line height) long. (Changed 2026-10-15 after critique r1.)
+  - Amber is dotted, #B26B00 at 90% opacity (3.6:1). Confidence is encoded by the dot spacing (gap
+    2.4 → 3.6 × width), not by opacity. Hovering says "70% sure: I read 5 as S?".
+  - The green tick is ≤ 10 px, #1E8A50 at 70% opacity, and fades out after 4 s unless "show ticks"
+    is on.
   - Shape carries the meaning, not colour. With reduced motion, marks are static.
 - **First error only.** Later lines that follow correctly from it carry no mark
   (`LineCheck.carried`); the card says "your next steps follow correctly from this". At most 3 red

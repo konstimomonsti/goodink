@@ -45,6 +45,7 @@ export default function LiveLayer({ vp, s, slot, bridge, pageId }: { vp: Viewpor
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const announceTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastPen = useRef(0);
+  const sigs = useRef(new Map<string, string>());
   const liveRef = useRef(live);
   liveRef.current = live;
   const engineRef = useRef<LiveUiEngine | null>(null);
@@ -92,8 +93,13 @@ export default function LiveLayer({ vp, s, slot, bridge, pageId }: { vp: Viewpor
     let next: number | null = null;
     const appeared: UiDecoration[] = [];
     for (const id of gate.pages()) {
-      const r = gate.compute(id);
-      vp.setLiveDecorations(id, r.decos);
+      const r = gate.compute(id, vp.visiblePageBox(id));
+      // only touch the page when what it shows changed (scrolling re-runs this)
+      const sig = r.decos.map((d) => `${d.id}|${d.kind}|${d.text ?? ''}|${d.transient ? 1 : 0}|${d.bbox.join(',')}`).join(';');
+      if (sigs.current.get(id) !== sig) {
+        sigs.current.set(id, sig);
+        vp.setLiveDecorations(id, r.decos);
+      }
       appeared.push(...r.appeared);
       if (r.nextAt != null) next = next == null ? r.nextAt : Math.min(next, r.nextAt);
     }
@@ -130,6 +136,21 @@ export default function LiveLayer({ vp, s, slot, bridge, pageId }: { vp: Viewpor
     clearTimeout(timer.current);
     clearTimeout(announceTimer.current);
   }, []);
+  // "per screen": which red marks show depends on what is in view
+  useEffect(() => {
+    let raf = 0;
+    const off = vp.onView(() => {
+      if (!raf)
+        raf = requestAnimationFrame(() => {
+          raf = 0;
+          flush();
+        });
+    });
+    return () => {
+      off();
+      cancelAnimationFrame(raf);
+    };
+  }, [vp, flush]);
 
   // ---- viewport → layer ----
   useEffect(() => {

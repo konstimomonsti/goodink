@@ -147,11 +147,12 @@ the spec), `RESEARCH-recognition.md`, `RESEARCH-ux.md`. Shared types:
   - Erasing removes marks within one frame.
   - A fixed step gets a 600 ms green tick fade, the only celebration.
 - **Marks**:
-  - Red: wavy, 1.5 px at 100% zoom, #E5484D light / #FF6369 dark, 70% opacity, 250 ms ease-out
-    draw-in played once.
-  - Amber: dotted, 55% opacity, scaled by confidence, with a hover that says "70% sure: I read 5 as
-    S?".
-  - Tick: ≤ 10 px at 40% opacity, fading after 4 s unless enabled.
+  - Red: wavy, 1.5 px at 100% zoom, #E5484D light / #FF6369 dark, 100% opacity (≥ 3:1 contrast
+    wins), amplitude 1.75 px, wavelength 6 px, clear of the ink by max(3 px, 0.12 × line height),
+    250 ms ease-out draw-in played once.
+  - Amber: dotted, #B26B00 at 90%, confidence encoded by dot spacing, with a hover that says "70%
+    sure: I read 5 as S?".
+  - Tick: ≤ 10 px, #1E8A50 at 70%, fading after 4 s unless enabled.
   - Shape encodes meaning (WCAG 1.4.1), and every mark has ≥ 3:1 contrast.
 - **Showing errors**: mark the **first error only**. Lines that follow correctly from it are
   "carried", with no mark. Show at most 3 red marks per screen, with a "+n" margin dot for the rest.
