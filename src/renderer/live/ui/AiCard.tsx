@@ -28,7 +28,7 @@ function b64(bytes: Uint8Array) {
   return btoa(s);
 }
 
-export function AiCard({ vp, engine, status, region, pinned, onPin, onClose, onListening }: { vp: Viewport; engine: LiveUiEngine; status: LiveStatus; region: AiRegion; pinned: boolean; onPin: (p: boolean) => void; onClose: () => void; onListening?: (on: boolean) => void }) {
+export function AiCard({ vp, engine, status, region, question, pinned, onPin, onClose, onListening }: { vp: Viewport; engine: LiveUiEngine; status: LiveStatus; region: AiRegion; question?: string; pinned: boolean; onPin: (p: boolean) => void; onClose: () => void; onListening?: (on: boolean) => void }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [follow, setFollow] = useState<string[]>([]);
   const [moved, setMoved] = useState(false);
@@ -96,6 +96,14 @@ export function AiCard({ vp, engine, status, region, pinned, onPin, onClose, onL
     },
     [busy, engine, msgs],
   );
+
+  // opened by a spoken question: answer it straight away, once
+  const asked = useRef(false);
+  useEffect(() => {
+    if (!question || asked.current) return;
+    asked.current = true;
+    void run(question);
+  }, [question, run]);
 
   // drag by the header: the card then keeps the place you gave it
   const drag = (e: React.PointerEvent) => {

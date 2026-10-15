@@ -23,7 +23,7 @@ const HINT_LABEL = { 1: 'Hint', 2: 'Next step', 3: 'Fix' } as const;
 const HINT_NEXT = { 1: 'Hint', 2: 'Next step', 3: 'Show fix' } as const;
 const HINT_ICON = { 1: <Lightbulb size={14} />, 2: <Footprints size={14} />, 3: <Wand2 size={14} /> } as const;
 
-export function InsightCard({ vp, engine, status, initial, onClose, onConvert, onPractice, onListening, onIssue }: { vp: Viewport; engine: LiveUiEngine; status: LiveStatus; initial: Insight; onClose: () => void; onConvert: (ins: Insight) => void; onPractice?: (ins: Insight) => void; onListening?: (on: boolean, ins: Insight) => void; onIssue?: (e: JournalEntry) => void }) {
+export function InsightCard({ vp, engine, status, initial, question, onClose, onConvert, onPractice, onListening, onIssue }: { vp: Viewport; engine: LiveUiEngine; status: LiveStatus; initial: Insight; question?: string; onClose: () => void; onConvert: (ins: Insight) => void; onPractice?: (ins: Insight) => void; onListening?: (on: boolean, ins: Insight) => void; onIssue?: (e: JournalEntry) => void }) {
   const [ins, setIns] = useState(initial);
   const [editing, setEditing] = useState<{ lineId: string; text: string } | null>(null);
   const [rechecking, setRechecking] = useState(false);
@@ -178,6 +178,14 @@ export function InsightCard({ vp, engine, status, initial, onClose, onConvert, o
     },
     [engine, ins, msgs, status.aiReady],
   );
+
+  // opened by a spoken question: answer it straight away, once
+  const asked = useRef(false);
+  useEffect(() => {
+    if (!question || asked.current) return;
+    asked.current = true;
+    void ask(question);
+  }, [question, ask]);
 
   /** Explain-back: one short comprehension question once the fix is shown. */
   const quiz = async () => {

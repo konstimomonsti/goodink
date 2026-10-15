@@ -3117,6 +3117,16 @@ export class Viewport {
     return !!this.aiPath?.closed;
   }
 
+  /** What is on screen of the current page, as a rectangular AI region (a spoken question with no ink in focus). */
+  visibleRegion(): AiRegion | null {
+    const i = Math.max(0, this.currentPage);
+    const p = this.session.pages[i];
+    const r = p && this.visiblePageRect(i, 0);
+    if (!p || !r) return null;
+    const x1 = r.x + r.w, y1 = r.y + r.h;
+    return { pageId: p.id, pts: [r.x, r.y, x1, r.y, x1, y1, r.x, y1], bbox: [r.x, r.y, x1, y1] };
+  }
+
   private paintAiPath(ctx: CanvasRenderingContext2D, dpr: number) {
     const a = this.aiPath!;
     const i = this.session.pageIndex(a.pageId);

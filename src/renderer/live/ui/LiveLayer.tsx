@@ -15,6 +15,7 @@ import { createUiEngine } from './adapter';
 import { StatusPill, setLive, useLive } from './StatusPill';
 import { InsightCard } from './InsightCard';
 import { AiCard } from './AiCard';
+import { VoiceAsk } from './VoiceAsk';
 import { MarkGate } from './markGate';
 import { PatternsDialog, loadJournal, saveJournal } from './Patterns';
 import { LIVE_TUNING as T } from './tuning';
@@ -26,7 +27,7 @@ export interface LiveBridge {
   onPenActivity?(pageId: string, x: number, y: number, down: boolean): void;
 }
 
-type AiCardState = { id: string; region: AiRegion; pinned: boolean };
+type AiCardState = { id: string; region: AiRegion; pinned: boolean; question?: string };
 
 /** Exam mode and paused pages outlive the layer (it unmounts when the tab is in the background). */
 const sessionState = new Map<string, { gate: MarkGate }>();
@@ -36,6 +37,8 @@ export default function LiveLayer({ vp, s, slot, bridge, pageId }: { vp: Viewpor
   const [engine, setEngine] = useState<LiveUiEngine | null>(null);
   const [status, setStatus] = useState<LiveStatus>({ mode: live.mode, state: 'idle', lastMs: null, tokens: 0, aiReady: false });
   const [card, setCard] = useState<Insight | null>(null);
+  // the question a card was opened with by voice (answered as soon as it opens)
+  const [cardQ, setCardQ] = useState<string | undefined>();
   const [ai, setAi] = useState<AiCardState[]>([]);
   const [patterns, setPatterns] = useState(false);
   const [journal, setJournal] = useState<JournalEntry[]>(() => loadJournal(s.id));
@@ -166,7 +169,10 @@ export default function LiveLayer({ vp, s, slot, bridge, pageId }: { vp: Viewpor
         return;
       }
       const ins = e.insightAt(pid, x, y);
-      if (ins) setCard(ins);
+      if (ins) {
+        setCardQ(undefined);
+        setCard(ins);
+      }
     };
     bridge.current.onAiRegion = (r) => {
       setAi((list) => {
@@ -269,6 +275,24 @@ export default function LiveLayer({ vp, s, slot, bridge, pageId }: { vp: Viewpor
     toast('Practice problem added below. Solve it right under the box; each step is checked.', { kind: 'success', ms: 6000, action: { label: 'Undo', run: () => s.undo() } });
   };
 
+  /** Asked by voice: the tutor opens on the block being written, or on what is on screen. */
+  const voiceAsk = (q: string) => {
+    const t = engineRef.current?.deicticTarget?.();
+    setRing(null);
+    if (t) {
+      setCardQ(q);
+      setCard(t);
+      return;
+    }
+    const region = vp.visibleRegion();
+    if (!region) return toast('Open a page to ask about it.');
+    setAi((list) => [...list.filter((c) => c.pinned), { id: uid(), region, pinned: false, question: q }]);
+  };
+  const voiceRing = (on: boolean) => {
+    const t = on ? engineRef.current?.deicticTarget?.() : null;
+    setRing(t ? t.pageId : null, t?.block.bbox);
+  };
+
   const closeCard = useCallback(() => {
     setCard(null);
     setRing(null);
@@ -280,23 +304,27 @@ export default function LiveLayer({ vp, s, slot, bridge, pageId }: { vp: Viewpor
     <>
       {slot &&
         createPortal(
+          <>
+          <VoiceAsk engine={engine} onAsk={voiceAsk} onListening={voiceRing} />
           <StatusPill
             status={{ ...status, mode: live.mode }}
             page={{ paused: gate.paused.has(pageId), onPause: (p) => setPaused(pageId, p) }}
             exam={{ on: gate.exam, hidden, onToggle: setExam, onReveal: reveal }}
             patterns={{ count: allJournal.length, open: () => setPatterns(true) }}
-          />,
+          />
+          </>,
           slot,
         )}
       {engine &&
         card &&
         createPortal(
           <InsightCard
-            key={card.block.id}
+            key={card.block.id + (cardQ ?? "")}
             vp={vp}
             engine={engine}
             status={status}
             initial={card}
+            question={cardQ}
             onClose={closeCard}
             onConvert={convert}
             onPractice={(i) => void practice(i)}
@@ -307,7 +335,7 @@ export default function LiveLayer({ vp, s, slot, bridge, pageId }: { vp: Viewpor
         )}
       {engine &&
         ai.map((c) =>
-          createPortal(<AiCard key={c.id} vp={vp} engine={engine} status={status} region={c.region} pinned={c.pinned} onPin={(p) => pinAi(c.id, p)} onClose={() => closeAi(c.id)} onListening={(on) => {
+          createPortal(<AiCard key={c.id} vp={vp} engine={engine} status={status} region={c.region} question={c.question} pinned={c.pinned} onPin={(p) => pinAi(c.id, p)} onClose={() => closeAi(c.id)} onListening={(on) => {
               // "why?", "this": the block under the pen or written last gets a hairline ring while listening
               const t = on ? engine.deicticTarget?.() : null;
               setRing(t ? t.pageId : null, t?.block.bbox);
