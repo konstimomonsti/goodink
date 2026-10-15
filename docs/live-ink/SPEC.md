@@ -90,3 +90,5 @@ correct radii, consistent 4 px spacing grid, no layout shift, 60 fps animations 
 `prefers-reduced-motion` respected, nothing clipped at small windows (760 × 520), dark mode
 correct, keyboard accessible (focus rings, Esc closes, Enter sends), aria labels, no console
 errors.
+
+- Contract note (recog, 2026-10-14): `LineRecognition.alternateLatex?: string[]` added (additive), the LaTeX of each alternate in the same order as `alternates`.

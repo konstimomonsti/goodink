@@ -59,6 +59,18 @@ function lex(src: string): string[] {
   return out;
 }
 
+/** tokens back to LaTeX: no spaces except where a command name would run into a letter */
+function joinToks(toks: string[]): string {
+  let out = '';
+  for (const t of toks) out += /\[a-zA-Z]+$/.test(out) && /^[a-zA-Z]/.test(t) ? ' ' + t : t;
+  return out;
+}
+
+/** The model's LaTeX without display delimiters and tokeniser spaces: the line's source of truth. */
+export function tidyLatex(src: string): string {
+  return joinToks(lex(src));
+}
+
 /** Parses LaTeX (as the model writes it) into a tree of visible atoms and 2-D structures. */
 export function parseLatex(src: string): TexNode[] {
   const toks = lex(src);
@@ -100,6 +112,20 @@ export function parseLatex(src: string): TexNode[] {
       } else if (t.startsWith('\\') && t.length > 1) {
         const name = t.slice(1);
         if (SKIP.has(name)) continue;
+        if (name === 'begin') {
+          // \begin{pmatrix}...\end{pmatrix}, cases, aligned: one opaque atom, kept as LaTeX
+          const env = group().map((x) => (x.t === 'atom' ? x.s : '')).join('');
+          const body: string[] = [];
+          for (let depth = 1; i < toks.length; i++) {
+            if (toks[i] === '\\begin') depth++;
+            if (toks[i] === '\\end' && --depth === 0) break;
+            body.push(toks[i]);
+          }
+          i++;
+          group(); // the \end's {name}
+          out.push({ t: 'atom', s: `\\begin{${env}}${joinToks(body)}\\end{${env}}` });
+          continue;
+        }
         if (WRAP.has(name)) {
           const g = group();
           // \operatorname{sin} or \mathrm{sin}: one function atom; otherwise the contents
@@ -108,7 +134,16 @@ export function parseLatex(src: string): TexNode[] {
           else out.push(...g);
         } else if (FUNCS.has(name)) out.push({ t: 'atom', s: name });
         else if (SYMBOL[name]) out.push({ t: 'atom', s: SYMBOL[name] });
-        else out.push({ t: 'atom', s: name.length === 1 ? name : `\\${name}` });
+        else if (toks[i] === '{' && name.length > 1) {
+          // \hat{x}, \mathbb{R}, \vec{v}: kept whole, as LaTeX
+          const start = ++i;
+          for (let depth = 1; i < toks.length; i++) {
+            if (toks[i] === '{') depth++;
+            if (toks[i] === '}' && --depth === 0) break;
+          }
+          out.push({ t: 'atom', s: `\\${name}{${joinToks(toks.slice(start, i))}}` });
+          i++;
+        } else out.push({ t: 'atom', s: name.length === 1 ? name : `\\${name}` });
       } else if (t === '~') {
         continue;
       } else {
@@ -155,8 +190,10 @@ export function texOf(nodes: TexNode[]): string {
 
 /** Text the math checker can't use: words, \text blocks (the model read prose as math). */
 export function looksLikeProse(nodes: TexNode[]): boolean {
-  const s = linear(nodes);
-  return /[a-zA-Z]{3,}/.test(s.replace(new RegExp([...FUNCS].sort((a, b) => b.length - a.length).join('|'), 'g'), '')) || /\\[a-zA-Z]/.test(s);
+  // atoms only: "sqrt" and other names the linear form adds are not words
+  const atoms = (ns: TexNode[]): string[] => ns.flatMap((n) => (n.t === 'atom' ? [n.s] : n.t === 'frac' ? [...atoms(n.num), ' ', ...atoms(n.den)] : [' ', ...atoms(n.body), ' ']));
+  const plain = atoms(nodes).map((a) => (FUNCS.has(a) || a.startsWith('\\') ? ' ' : a)).join('');
+  return /[a-zA-Z]{3,}/.test(plain);
 }
 
 // ---- alignment: tree <-> layout --------------------------------------------------------------------
@@ -302,10 +339,16 @@ function emitAligned(nodes: TexNode[], run: Run | null, out: Emit) {
 
 /** One reading of a line: linear text, tidy LaTeX and stroke-mapped tokens. */
 export function readLatex(latex: string, root: Run | null): { text: string; latex: string; tokens: InkToken[]; nodes: TexNode[] } {
-  const nodes = parseLatex(latex);
+  let nodes = parseLatex(latex);
+  let tex = tidyLatex(latex);
+  // a script with nothing to attach to ("^ x = 2", a known misread of short lines) is plain ink
+  while (nodes[0] && (nodes[0].t === 'sup' || nodes[0].t === 'sub')) {
+    nodes = [...nodes[0].body, ...nodes.slice(1)];
+    tex = texOf(nodes);
+  }
   const out = new Emit();
   emitAligned(nodes, root, out);
-  return { text: out.text, latex: texOf(nodes), tokens: out.tokens, nodes };
+  return { text: out.text, latex: tex, tokens: out.tokens, nodes };
 }
 
 // ---- backend ------------------------------------------------------------------------------------
@@ -316,20 +359,33 @@ export interface HmerBackendOptions {
   ep?: 'cpu' | 'dml';
 }
 
+/** A LineRecognition plus the model's LaTeX readings (LaTeX is the source of truth for math). */
+export interface HmerRecognition extends LineRecognition {
+  /** LaTeX of each alternate (same order as alternates) */
+  alternateLatex: string[];
+  /** every distinct LaTeX reading, most probable first, probabilities summing to 1 */
+  readings: { latex: string; text: string; prob: number }[];
+}
+
 /**
  * Readings -> one LineRecognition. Confidence is the top reading's sequence probability (the model's
  * own estimate that the whole line is right); alternates carry the other readings' shares of the
  * probability mass, merged when two LaTeX strings read the same.
  */
-export function toRecognition(lineId: string, hyps: HmerHyp[], root: Run | null): LineRecognition | null {
+export function toRecognition(lineId: string, hyps: HmerHyp[], root: Run | null): HmerRecognition | null {
   if (!hyps.length) return null;
-  const read = hyps.map((h) => ({ h, r: readLatex(h.latex, root) })).filter((x) => x.r.text);
+  const read = hyps.map((h) => ({ h, r: readLatex(h.latex, root) })).filter((x) => x.r.latex);
   if (!read.length || looksLikeProse(read[0].r.nodes)) return null;
-  const mass = new Map<string, number>();
-  for (const { h, r } of read) mass.set(r.text, (mass.get(r.text) ?? 0) + Math.exp(h.logp));
-  const total = [...mass.values()].reduce((a, b) => a + b, 0) || 1;
+  const byTex = new Map<string, { text: string; p: number }>();
+  for (const { h, r } of read) {
+    const e = byTex.get(r.latex);
+    if (e) e.p += Math.exp(h.logp);
+    else byTex.set(r.latex, { text: r.text, p: Math.exp(h.logp) });
+  }
+  const total = [...byTex.values()].reduce((a, b) => a + b.p, 0) || 1;
+  const readings = [...byTex.entries()].map(([latex, e]) => ({ latex, text: e.text, prob: Math.round((e.p / total) * 1000) / 1000 })).sort((a, b) => b.prob - a.prob);
   const best = read[0].r;
-  const alts = [...mass.entries()].filter(([t]) => t !== best.text).sort((a, b) => b[1] - a[1]);
+  const alts = readings.filter((x) => x.latex !== best.latex);
   const pBest = Math.exp(read[0].h.logp);
   return {
     lineId,
@@ -337,8 +393,10 @@ export function toRecognition(lineId: string, hyps: HmerHyp[], root: Run | null)
     text: best.text,
     latex: best.latex,
     confidence: Math.max(0.01, Math.min(0.99, pBest)),
-    alternates: alts.map(([t]) => t),
-    alternateProbs: alts.map(([, p]) => Math.round((p / total) * 1000) / 1000),
+    alternates: alts.map((x) => x.text),
+    alternateProbs: alts.map((x) => x.prob),
+    alternateLatex: alts.map((x) => x.latex),
+    readings,
     tokens: best.tokens,
     source: 'local-ink',
   };

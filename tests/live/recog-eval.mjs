@@ -21,7 +21,6 @@ function cer(a, b) {
 }
 
 export default async ({ win, shot }) => {
-  await win.setViewportSize({ width: 1440, height: 900 }).catch(() => {});
   await newNotebook(win, 'Recognition eval');
   // load the module through Vite and warm the recogniser
   const warm = await win.evaluate(async () => {

@@ -47,6 +47,8 @@ export interface LineRecognition {
   alternates: string[]; // other readings, most likely first
   /** probability of each alternate (same order); the CAS checks every reading with p >= 0.1 */
   alternateProbs?: number[];
+  /** LaTeX of each alternate (same order); LaTeX is the source of truth for math lines */
+  alternateLatex?: string[];
   tokens: InkToken[];
   source: RecogSource;
 }

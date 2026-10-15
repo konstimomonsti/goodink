@@ -544,6 +544,7 @@ export function readLine(lineId: string, layout: Layout, runWords: WordIn[][]): 
   const latex = emit(layout.root, readings, out);
   // other readings of the line: the runner-ups of one run at a time, and of two runs together
   const alts = new Map<string, number>(); // text -> extra cost over the best reading
+  const altLatex = new Map<string, string>();
   const tryAlt = (swaps: [Run, RunReading][]) => {
     const m = new Map(readings);
     let extra = 0;
@@ -552,8 +553,11 @@ export function readLine(lineId: string, layout: Layout, runWords: WordIn[][]): 
       extra += alt.cost - readings.get(run)!.cost;
     }
     const o = new Out();
-    emit(layout.root, m, o);
-    if (o.text !== out.text && !(alts.get(o.text)! <= extra)) alts.set(o.text, extra);
+    const lx = emit(layout.root, m, o);
+    if (o.text !== out.text && !(alts.get(o.text)! <= extra)) {
+      alts.set(o.text, extra);
+      altLatex.set(o.text, lx);
+    }
   };
   const runners = runs.flatMap((run) => (options.get(run) ?? []).slice(1, 4).map((alt) => [run, alt] as [Run, RunReading]));
   for (const a of runners) tryAlt([a]);
@@ -583,6 +587,7 @@ export function readLine(lineId: string, layout: Layout, runWords: WordIn[][]): 
     confidence: Math.round(confidence * 1000) / 1000,
     alternates: ranked.map(([t]) => t),
     alternateProbs,
+    alternateLatex: ranked.map(([t]) => altLatex.get(t) ?? ''),
     tokens: out.tokens,
     source: 'local-ink',
   };

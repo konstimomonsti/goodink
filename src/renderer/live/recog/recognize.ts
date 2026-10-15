@@ -19,6 +19,11 @@ export interface LineInput {
 
 export interface RecogBackend {
   name: string;
+  /**
+   * A dedicated math reader (the HMER model): on math lines its LaTeX wins unless it is clearly
+   * less sure than the others; prose lines stay with the text reader (InkAnalyzer).
+   */
+  math?: boolean;
   /** one result per input line (null = no opinion); may throw, which counts as all null */
   recognize(lines: LineInput[]): Promise<(LineRecognition | null)[]>;
 }
@@ -64,41 +69,69 @@ export function inkBackend(analyze: Analyze): RecogBackend {
   };
 }
 
-/** A backend's reading as a distribution over texts: its top line plus its alternates. */
-function dist(r: LineRecognition): Map<string, number> {
-  const d = new Map<string, number>([[r.text, r.confidence]]);
-  r.alternates.forEach((t, i) => {
-    const p = r.alternateProbs?.[i] ?? 0;
-    if (!d.has(t)) d.set(t, p);
-  });
-  return d;
-}
+/** Readings compare by their linear text without spaces and single-token parentheses: (3)/(4) = 3/4. */
+const key = (t: string) => t.replace(/\s+/g, '').replace(/\(([^()+\-*/=]{1,3})\)/g, '$1').replace(/·|×/g, '*');
+
+/** How much a non-math reader's probabilities count on a line a math reader also read. */
+const TEXT_READER_WEIGHT = 0.85;
 
 /**
- * Per line, fuses the backends' readings. Each reading counts as independent evidence for its
- * texts (noisy-or of their probabilities), so two backends agreeing raise the confidence and a
- * disagreement keeps the loser as a weighted alternate. Tokens and LaTeX come from the backend
- * whose top reading won.
+ * Per line, fuses the backends' readings (in backend order; `backends` tells which are math
+ * readers). The router:
+ * - prose: a text reader's confident 'text' line wins (math readers return nothing for prose);
+ * - math: every reading is a distribution over texts (top line + alternates); texts that agree
+ *   add up as independent evidence (noisy-or), the math reader's evidence counts fully and the
+ *   text reader's slightly less, so ties go to the LaTeX-native model. LaTeX and tokens come from
+ *   the backend whose top reading won; when a text reader read the same line, its glyph-level
+ *   tokens are kept (they map exactly onto strokes).
  */
-export function fuse(results: (LineRecognition | null)[]): LineRecognition | null {
-  const ok = results.filter((r): r is LineRecognition => !!r && !!r.text);
-  if (!ok.length) return results.find((r) => !!r) ?? null;
-  if (ok.length === 1) return ok[0];
-  const ds = ok.map(dist);
-  const texts = new Set(ds.flatMap((d) => [...d.keys()]));
-  const score = new Map<string, number>();
-  for (const t of texts) score.set(t, 1 - ds.reduce((q, d) => q * (1 - (d.get(t) ?? 0)), 1));
-  // the winner must be some backend's top reading (it carries tokens and LaTeX)
-  const best = ok.slice().sort((x, y) => score.get(y.text)! - score.get(x.text)! || y.confidence - x.confidence)[0];
-  const ranked = [...score].filter(([t]) => t !== best.text).sort((x, y) => y[1] - x[1]);
-  let top = score.get(best.text)!;
-  // keep it a distribution: the alternates share what the winner leaves
-  const rest = ranked.reduce((q, [, p]) => q + p, 0);
+export function fuse(results: (LineRecognition | null)[], backends: Pick<RecogBackend, 'math'>[] = []): LineRecognition | null {
+  const items = results.map((r, i) => ({ r: r!, math: !!backends[i]?.math })).filter((x) => !!x.r && !!x.r.text);
+  if (!items.length) return results.find((r) => !!r) ?? null;
+  const anyMath = items.some((x) => x.math);
+  const prose = items.find((x) => !x.math && x.r.kind === 'text');
+  if (prose && (!anyMath || prose.r.confidence >= 0.6)) return prose.r;
+  if (items.length === 1) return items[0].r;
+  type Entry = { text: string; latex: string; score: number };
+  const entries = new Map<string, Entry>();
+  const miss = new Map<string, number>(); // product of (1 - p) per text
+  for (const { r, math } of items) {
+    const w = anyMath && !math ? TEXT_READER_WEIGHT : 1;
+    const add = (text: string, latex: string, p: number) => {
+      const k = key(text);
+      if (!entries.has(k)) entries.set(k, { text, latex, score: 0 });
+      else if (math && latex) entries.get(k)!.latex = latex; // the math reader's LaTeX for a shared text
+      miss.set(k, (miss.get(k) ?? 1) * (1 - Math.min(0.999, p * w)));
+    };
+    add(r.text, r.latex, r.confidence);
+    r.alternates.forEach((t, i) => add(t, r.alternateLatex?.[i] ?? '', r.alternateProbs?.[i] ?? 0));
+  }
+  for (const [k, e] of entries) e.score = 1 - miss.get(k)!;
+  // the winner is some backend's top reading (it carries tokens and LaTeX)
+  const tops = items.slice().sort((x, y) => entries.get(key(y.r.text))!.score - entries.get(key(x.r.text))!.score || Number(y.math) - Number(x.math));
+  const win = tops[0];
+  const k0 = key(win.r.text);
+  let top = entries.get(k0)!.score;
+  // same line read by a text reader: its tokens are glyph-exact
+  const twin = items.find((x) => !x.math && key(x.r.text) === k0);
+  const tokens = twin && twin.r.tokens.length ? twin.r.tokens : win.r.tokens;
+  const latex = entries.get(k0)!.latex || win.r.latex;
+  const ranked = [...entries].filter(([k]) => k !== k0).sort((x, y) => y[1].score - x[1].score);
+  const rest = ranked.reduce((q, [, e]) => q + e.score, 0);
   const room = Math.max(0, 1 - top);
-  const k = rest > room && rest > 0 ? room / rest : 1;
+  const scale = rest > room && rest > 0 ? room / rest : 1;
   top = Math.min(0.995, top);
-  const alts = ranked.slice(0, 5);
-  return { ...best, confidence: Math.round(top * 1000) / 1000, alternates: alts.map(([t]) => t), alternateProbs: alts.map(([, p]) => Math.round(p * k * 1000) / 1000) };
+  const alts = ranked.slice(0, 5).map(([, e]) => e);
+  return {
+    ...win.r,
+    kind: 'math',
+    latex,
+    tokens,
+    confidence: Math.round(top * 1000) / 1000,
+    alternates: alts.map((e) => e.text),
+    alternateProbs: alts.map((e) => Math.round(e.score * scale * 1000) / 1000),
+    alternateLatex: alts.map((e) => e.latex),
+  };
 }
 
 const CACHE_MAX = 600;
@@ -136,7 +169,7 @@ export function makeRecognizer(backends: RecogBackend[]) {
       const all = await Promise.all(backends.map((b) => b.recognize(inputs).catch(() => inputs.map(() => null))));
       todo.forEach((t, k) => {
         const line = block.lines[t.i];
-        const rec = fuse(all.map((r) => r[k] ?? null));
+        const rec = fuse(all.map((r) => r[k] ?? null), backends);
         if (rec) {
           out[t.i] = rec;
           cache.set(t.key, rec);

@@ -324,6 +324,116 @@ const boxOf = (ink: Ink[]): BBox => {
 
 const inkCache = new WeakMap<Stroke, Ink>();
 
+/**
+ * 2-D structures become one unit, so the row chaining below cannot split them:
+ * - tall delimiters (brackets, braces, bars, integral signs) own what sits inside their vertical
+ *   span up to their matching delimiter, or up to a wide gap without one: matrix and vector
+ *   entries, the lines of a cases brace, an integral's limits and integrand;
+ * - stacks: small glyphs right above or below a big one (limits of Σ, Π, lim) and accents
+ *   (bar, hat, dot, arrow) right above a glyph.
+ * Merges in place; a compound keeps the midline of its biggest glyph.
+ */
+function compound(units: Unit[], unitH: number) {
+  const n = units.length;
+  if (n < 2) return;
+  const parent = new Int32Array(n).map((_, i) => i);
+  const h = (u: Unit) => u.y1 - u.y0, w = (u: Unit) => u.x1 - u.x0;
+  let maxW = 0;
+  for (const u of units) maxW = Math.max(maxW, w(u));
+  const tall = (u: Unit) => u.ink.length <= 2 && h(u) >= unitH * 1.75 && w(u) <= h(u) * 0.7;
+  for (let i = 0; i < n; i++) {
+    const t = units[i];
+    if (!tall(t)) continue;
+    // inside: centred within the span and mostly covered by it (handwritten entries poke out)
+    const inside = (u: Unit) => {
+      const c = (u.y0 + u.y1) / 2;
+      return c > t.y0 && c < t.y1 && Math.min(u.y1, t.y1) - Math.max(u.y0, t.y0) >= h(u) * 0.5;
+    };
+    // the matching delimiter: the next tall glyph to the right covering most of the same span
+    let close = -1;
+    for (let j = i + 1; j < n && units[j].x0 < t.x1 + unitH * 14; j++) {
+      const u = units[j];
+      const ov = Math.min(u.y1, t.y1) - Math.max(u.y0, t.y0);
+      if (tall(u) && ov > Math.min(h(u), h(t)) * 0.6) {
+        close = j;
+        break;
+      }
+    }
+    const members: number[] = [];
+    // an unpaired sign (integral, cases brace) also owns what sits at its corners: the limits
+    const corner = (u: Unit) => close < 0 && h(u) < unitH * 1.2 && u.x0 < t.x1 + unitH * 1.2 && u.x1 > t.x0 - unitH * 0.3 && (u.y0 + u.y1) / 2 > t.y0 - unitH * 0.6 && (u.y0 + u.y1) / 2 < t.y1 + unitH * 0.6;
+    for (let j = i - 1; j >= 0 && units[j].x0 > t.x0 - maxW; j--) if (corner(units[j])) members.push(j);
+    let lastX = t.x1;
+    for (let j = i + 1; j < n; j++) {
+      const u = units[j];
+      if (close >= 0 ? j > close : u.x0 - lastX > unitH * 2.5) break;
+      if (!inside(u) && !corner(u) && j !== close) continue;
+      members.push(j);
+      lastX = Math.max(lastX, u.x1);
+    }
+    // only a real span: content on two levels (matrix rows, cases) or something past a lone sign
+    if (!members.length) continue;
+    for (const j of members) union(parent, i, j);
+  }
+  const limits: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const big = units[i];
+    if (big.ink.every((k) => k.flat || k.dot)) continue;
+    const isBig = h(big) >= unitH * 1.3 || w(big) >= unitH * 1.3;
+    // units are sorted by x0: only neighbours that can overlap big horizontally
+    let j0 = i;
+    while (j0 > 0 && units[j0 - 1].x0 >= big.x0 - maxW) j0--;
+    for (let j = j0; j < n && units[j].x0 <= big.x1 + unitH * 0.5; j++) {
+      if (j === i) continue;
+      const v = units[j];
+      if (v.y0 > big.y1 + unitH || v.y1 < big.y0 - unitH) continue;
+      const xo = Math.min(v.x1, big.x1) - Math.max(v.x0, big.x0);
+      const vc = (v.x0 + v.x1) / 2;
+      if (xo < w(v) * 0.5 && !(isBig && vc > big.x0 - unitH * 0.3 && vc < big.x1 + unitH * 0.3)) continue;
+      const above = big.y0 - v.y1, below = v.y0 - big.y1;
+      const accent = (v.ink.every((k) => k.flat || k.dot) || Math.max(w(v), h(v)) < unitH * 0.6) && above > -unitH * 0.1 && above < unitH * 0.45;
+      const limit = isBig && h(v) < h(big) * 0.8 && ((above > -unitH * 0.1 && above < unitH) || (below > -unitH * 0.1 && below < unitH));
+      if (limit) limits.push(j);
+      if (accent || limit) {
+        union(parent, i, j);
+      }
+    }
+  }
+  // a limit is often wider than its operator ("k=1" under Σ): its neighbours on that level join too
+  for (let k = 0; k < limits.length; k++) {
+    const v = units[limits[k]];
+    for (let j = Math.max(0, limits[k] - 3); j < Math.min(n, limits[k] + 4); j++) {
+      const u = units[j];
+      if (find(parent, j) === find(parent, limits[k]) || h(u) > unitH * 1.2) continue;
+      const gap = Math.max(u.x0 - v.x1, v.x0 - u.x1);
+      if (gap < unitH * 0.5 && Math.abs((u.y0 + u.y1) / 2 - (v.y0 + v.y1) / 2) < unitH * 0.35) {
+        union(parent, j, limits[k]);
+        limits.push(j);
+      }
+    }
+  }
+  const groups = new Map<number, number[]>();
+  for (let i = 0; i < n; i++) {
+    const r = find(parent, i);
+    const g = groups.get(r);
+    if (g) g.push(i);
+    else groups.set(r, [i]);
+  }
+  if (groups.size === n) return;
+  const out: Unit[] = [];
+  for (const g of groups.values()) {
+    if (g.length === 1) {
+      out.push(units[g[0]]);
+      continue;
+    }
+    // the compound keeps the midline of its biggest glyph (the bracket, Σ, ∫, or an accent's base)
+    const a = units[g.reduce((b, k) => (h(units[k]) > h(units[b]) ? k : b), g[0])];
+    out.push(unitOf(g.flatMap((k) => units[k].ink), a.cy, unitH));
+  }
+  out.sort((a, b) => a.x0 - b.x0);
+  units.splice(0, n, ...out);
+}
+
 /** Splits one page's writing into lines (left-to-right chains along a midline) and blocks. */
 export function groupStrokes(pageId: string, strokes: readonly Stroke[]): InkBlock[] {
   const inks: Ink[] = [];
@@ -348,6 +458,7 @@ export function groupStrokes(pageId: string, strokes: readonly Stroke[]): InkBlo
   }
   for (const s of symbols(inks.filter((k) => !inFrac.has(k)), unitH)) units.push(unitOf(s.ink, s.cy, unitH));
   units.sort((a, b) => a.x0 - b.x0);
+  compound(units, unitH);
 
   // chain units into rows: each joins the open row whose midline is closest, if near enough
   const rows: Row[] = [];
