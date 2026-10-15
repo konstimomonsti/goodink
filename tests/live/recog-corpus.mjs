@@ -25,3 +25,11 @@ export const corpus = [
   ['The derivative is 2x'], ['solve for x'], ['check the answer'], ['this is wrong'], ['Hello world'],
   ['find the area of the circle'], ['the answer is five'], ['Divide both sides by two'],
 ].map(([write, expect]) => ({ write, expect: expect ?? write, kind: /^[A-Za-z ]+$/.test(write) && / /.test(write) ? 'text' : /[a-z]{3} /.test(write) ? 'text' : 'math' }));
+
+/** Regression cases from the critic (docs/live-ink/critique-r1.md), written with exact seeds. */
+export const criticCases = [
+  // P0-2: a variable definition read as 0=3 with 0.98 confidence
+  ...[42, 43].map((seed) => ({ write: 'a=3', expect: 'a=3', kind: 'math', seed, gate: 'look-alike' })),
+  // P0-5: the trailing "=" (live results) must survive
+  ...['12+5=', '3+4=', '100-1='].flatMap((write) => [41, 42, 43, 44, 45].map((seed) => ({ write, expect: write, kind: 'math', seed, gate: 'trailing-eq' }))),
+];

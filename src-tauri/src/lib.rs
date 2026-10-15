@@ -864,6 +864,7 @@ pub fn run() {
         ])
         .setup(move |app| {
             T_SETUP.store(now_ms(), Ordering::Relaxed);
+            ink::init(); // load the handwriting recogniser on its own thread
             let url = if test { "index.html?test=1" } else { "index.html" };
             let (theme, dark) = startup_theme(&app.state::<AppState>().store());
             let bg = if dark { tauri::window::Color(0x12, 0x12, 0x14, 0xff) } else { tauri::window::Color(0xf2, 0xf2, 0xf5, 0xff) };

@@ -6,7 +6,7 @@
 // tests/shots/recog-eval.json. Env: RECOG_JITTERS=0.3,0.6,0.9  RECOG_SEEDS=1,2
 import fs from 'node:fs';
 import { newNotebook, writeText, clearPage, pageStrokes } from './handwriting.mjs';
-import { corpus } from './recog-corpus.mjs';
+import { corpus, criticCases } from './recog-corpus.mjs';
 
 const jitters = (process.env.RECOG_JITTERS ?? '0.3,0.6,0.9').split(',').map(Number);
 const seeds = (process.env.RECOG_SEEDS ?? '1,2').split(',').map(Number);
@@ -34,6 +34,8 @@ export default async ({ win, shot }) => {
 
   const jobs = [];
   for (const jitter of jitters) for (const seed of seeds) for (const item of corpus) jobs.push({ ...item, jitter, seed });
+  // critic regressions: default jitter, the exact seeds the critic used
+  for (const c of criticCases) jobs.push({ ...c, jitter: 0.4, rawSeed: c.seed });
   const rows = [];
   const pages = []; // the captured ink, for replaying offline
   for (let p = 0; p < jobs.length; p += PER_PAGE) {
@@ -41,11 +43,11 @@ export default async ({ win, shot }) => {
     await clearPage(win);
     for (let k = 0; k < batch.length; k++) {
       const j = batch[k];
-      await writeText(win, j.write, { x: 60, y: 90 + k * 92, size: 24, jitter: j.jitter, seed: j.seed * 13 + Math.round(j.jitter * 10) });
+      await writeText(win, j.write, { x: 60, y: 90 + k * 92, size: 24, jitter: j.jitter, seed: j.rawSeed ?? j.seed * 13 + Math.round(j.jitter * 10) });
     }
     if (p === 0) await shot('recog-eval-page');
     const { pageId, strokes } = await pageStrokes(win);
-    pages.push({ batch: batch.map((j) => ({ write: j.write, expect: j.expect, kind: j.kind, jitter: j.jitter, seed: j.seed })), strokes: strokes.map((s) => ({ id: s.id, kind: s.kind, pts: s.pts.map((v) => Math.round(v * 100) / 100) })) });
+    pages.push({ batch: batch.map((j) => ({ write: j.write, expect: j.expect, kind: j.kind, jitter: j.jitter, seed: j.seed, gate: j.gate })), strokes: strokes.map((s) => ({ id: s.id, kind: s.kind, pts: s.pts.map((v) => Math.round(v * 100) / 100) })) });
     const res = await win.evaluate(
       async ({ pageId, strokes }) => {
         const m = window.__recog;
@@ -75,7 +77,8 @@ export default async ({ win, shot }) => {
       const conf = lines.length ? Math.min(...lines.map((l) => l.conf)) : 0;
       const alts = lines[0]?.alts ?? [];
       const ai = alts.indexOf(j.expect);
-      rows.push({ ...j, got, ok: got === j.expect, conf, cer: cer(got, j.expect), ms: lines.reduce((a, l) => a + l.ms, 0), pExp: got === j.expect ? conf : ai >= 0 ? lines[0].probs[ai] ?? 0 : 0, groupMs: res.groupMs });
+      const lx = alts.indexOf(j.expect);
+      rows.push({ ...j, altP: lx >= 0 ? lines[0].probs[lx] ?? 0 : 0, got, ok: got === j.expect, conf, cer: cer(got, j.expect), ms: lines.reduce((a, l) => a + l.ms, 0), pExp: got === j.expect ? conf : ai >= 0 ? lines[0].probs[ai] ?? 0 : 0, groupMs: res.groupMs });
     });
   }
 
@@ -93,7 +96,8 @@ export default async ({ win, shot }) => {
     }
     return out;
   }, (await pageStrokes(win)).strokes);
-  const math = rows.filter((r) => r.kind === 'math'), text = rows.filter((r) => r.kind === 'text');
+  const crit = rows.filter((r) => r.gate);
+  const math = rows.filter((r) => r.kind === 'math' && !r.gate), text = rows.filter((r) => r.kind === 'text');
   const pct = (a, b) => ((100 * a) / Math.max(1, b)).toFixed(1) + '%';
   const mean = (a) => a.reduce((x, y) => x + y, 0) / Math.max(1, a.length);
   const q = (a, f) => a.slice().sort((x, y) => x - y)[Math.min(a.length - 1, Math.floor(a.length * f))];
@@ -115,6 +119,10 @@ export default async ({ win, shot }) => {
     latencyPerLineMs: { p50: +q(rows.map((r) => r.ms), 0.5).toFixed(1), p95: +q(rows.map((r) => r.ms), 0.95).toFixed(1) },
     groupInkMs: { p50: +q(rows.map((r) => r.groupMs), 0.5).toFixed(2) },
     warmUpMs: Math.round(warm),
+    critic: {
+      trailingEq: pct(crit.filter((r) => r.gate === 'trailing-eq' && r.ok).length, crit.filter((r) => r.gate === 'trailing-eq').length),
+      lookAlike: crit.filter((r) => r.gate === 'look-alike').map((r) => ({ seed: r.seed, got: r.got, conf: r.conf, pTruth: r.ok ? r.conf : r.altP })),
+    },
     probeLine: { roundTripP50: +q(probe.map((x) => x[0]), 0.5).toFixed(1), recogniserP50: +q(probe.map((x) => x[1]), 0.5).toFixed(1) },
   };
   console.log(JSON.stringify(summary, null, 2));

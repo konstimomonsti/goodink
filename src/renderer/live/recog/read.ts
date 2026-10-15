@@ -81,7 +81,7 @@ function tallRef(syms: Sym[]): number {
   let v = tallRefs.get(syms);
   if (v == null) {
     const hs = syms.filter((x) => !x.flat && !x.dot).map((x) => x.h).sort((a, b) => a - b);
-    v = hs.length >= 3 ? hs[Math.floor(hs.length * 0.75)] : 0;
+    v = hs.length >= 2 ? hs[Math.floor(hs.length * 0.75)] : 0;
     tallRefs.set(syms, v);
   }
   return v;
@@ -131,7 +131,11 @@ function align(chars: string, syms: Sym[], run: Run, tall: number): { cost: numb
       if (i < m && j < n) relax(i, j, 1, 1, shapeCost(chars[i], syms[j], run, tall));
       if (i + 1 < m && j < n && syms[j].w > hh * 0.5) relax(i, j, 2, 1, 0.8);
       if (i + 2 < m && j < n && syms[j].w > hh * 0.9) relax(i, j, 3, 1, 1.6);
-      if (i < m && j + 1 < n) relax(i, j, 1, 2, 0.8 + (chars[i] === '=' && syms[j].flat && syms[j + 1].flat ? -0.8 : 0));
+      if (i < m && j + 1 < n) {
+        // a char never swallows a whole "=" or "÷" glyph (it is skipped instead, and kept by shape)
+        const op = chars[i] !== '=' && chars[i] !== '÷' && (isEqSym(syms[j]) || isEqSym(syms[j + 1]) || isDivSym(syms[j]) || isDivSym(syms[j + 1]));
+        relax(i, j, 1, 2, 0.8 + (chars[i] === '=' && syms[j].flat && syms[j + 1].flat ? -0.8 : 0) + (op ? 1.2 : 0));
+      }
       if (i < m && j + 2 < n) relax(i, j, 1, 3, 1.6);
       if (j < n) relax(i, j, 0, 1, 1.5);
       if (i < m) relax(i, j, 1, 0, 1.5);
@@ -248,6 +252,17 @@ function normalise(pieces: Piece[], run: Run): number {
     for (let t = 0; t < p.chars.length; t++) out += cs[k++].c;
     p.chars = out;
   }
+  // a glyph the reading skipped but whose shape is unambiguous keeps its operator: the trailing
+  // "=" of "12+5=" (critic r1 P0-5) is often dropped by the recogniser
+  for (const p of pieces) {
+    if (p.chars || p.syms.length !== 1) continue;
+    const g = p.syms[0];
+    const op = isEqSym(g) ? '=' : isDivSym(g) ? '÷' : null;
+    if (op) {
+      p.chars = op;
+      subs++;
+    }
+  }
   return subs;
 }
 
@@ -272,7 +287,7 @@ function implausible(s: string, isScript: boolean): number {
   }
   pen += depth * 1.2;
   if (/^[×÷=+]/.test(s)) pen += 1;
-  if (/[+×÷=-]$/.test(s) && !isScript) pen += 0.6;
+  if (/[+×÷-]$/.test(s) && !isScript) pen += 0.6; // a trailing "=" asks for the result
   if ((s.match(/=/g) ?? []).length > 2) pen += 1;
   const letters = s.match(/[a-zA-Z]{3,}/g) ?? [];
   for (const w of letters) if (!FUNCS.some((f) => w.includes(f))) pen += 0.15 * (w.length - 2);
@@ -513,6 +528,21 @@ export const CALIB = [2.869, 0.957, 0.074, -1.122, -0.891, 0.482];
 /** features of the last math line read (for calibration tooling) */
 export const lastFeatures: number[] = [];
 
+/** letter/digit look-alikes (critic r1 P0-2): a/0/9/6, l/1, o/0, S/5, z/2, b/6, g/9, q/9 */
+const LOOK_ALIKE: Record<string, string> = { a: 'A', o: 'A', O: 'A', '0': 'A', '9': 'A', '6': 'A', b: 'A', g: 'A', q: 'A', G: 'A', l: 'L', I: 'L', '|': 'L', '1': 'L', s: 'S', S: 'S', '5': 'S', z: 'Z', Z: 'Z', '2': 'Z' };
+const LOOK_ALIKE_P = 0.12;
+
+/** same string except for letter<->digit look-alike swaps */
+function onlyLookAlikes(a: string, b: string): boolean {
+  if (a.length !== b.length || a === b) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] === b[i]) continue;
+    const ca = LOOK_ALIKE[a[i]], cb = LOOK_ALIKE[b[i]];
+    if (!ca || ca !== cb || DIGIT.test(a[i]) === DIGIT.test(b[i])) return false;
+  }
+  return true;
+}
+
 const sigmoid = (x: number) => 1 / (1 + Math.exp(-x));
 
 /**
@@ -573,12 +603,22 @@ export function readLine(lineId: string, layout: Layout, runWords: WordIn[][]): 
   lastFeatures.splice(0, lastFeatures.length, ...feats);
   let confidence = sigmoid(CALIB.reduce((a, w, k) => a + w * (k ? feats[k - 1] : 1), 0));
   if (!letters) confidence = 0;
+  // a runner-up that differs only by letter/digit look-alikes (a=3 vs 0=3) is a real possibility:
+  // such a line is never trusted beyond 0.85, and those readings keep an honest share (critic P0-2)
+  const lookAlike = ranked.slice(0, 3).filter(([t]) => onlyLookAlikes(out.text, t)).map(([t]) => t);
+  if (lookAlike.length) confidence = Math.min(confidence, 0.85, 0.98 - 0.12 * lookAlike.length);
   // the rest of the probability goes to the alternates, by how much more they cost
   const w = ranked.map(([, extra]) => Math.exp(-extra / ALT_TEMP));
   const wsum = w.reduce((a, b) => a + b, 0);
   // most misreadings are not among the alternates at all (measured ~1 in 3), so they share only
   // part of the remaining probability
-  const alternateProbs = w.map((x) => Math.round(((1 - confidence) * ALT_COVER * x) / Math.max(wsum, 1e-9) * 1000) / 1000);
+  let probs = w.map((x) => ((1 - confidence) * ALT_COVER * x) / Math.max(wsum, 1e-9));
+  if (lookAlike.length) {
+    probs = probs.map((p, i) => (lookAlike.includes(ranked[i][0]) ? Math.max(p, LOOK_ALIKE_P) : p));
+    const total = probs.reduce((a, b) => a + b, 0);
+    if (total > 1 - confidence) probs = probs.map((p) => (p * (1 - confidence)) / total);
+  }
+  const alternateProbs = probs.map((p) => Math.round(p * 1000) / 1000);
   return {
     lineId,
     kind: 'math',
