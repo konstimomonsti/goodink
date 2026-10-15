@@ -22,9 +22,13 @@ export interface AiJudge {
   fix: string;
   misconception: string;
   concept: string;
+  /** a step of a proof or argument (red then needs a named logical gap from both models) */
+  proof: boolean;
+  /** for a proof step: the specific logical gap */
+  gap: string;
 }
 
-const JUDGE_FIELDS = ['reading_ok', 'corrected', 'latex', 'verdict', 'wrong_span', 'title', 'detail', 'hint', 'fix', 'misconception', 'concept'] as const;
+const JUDGE_FIELDS = ['reading_ok', 'corrected', 'latex', 'step_kind', 'verdict', 'wrong_span', 'title', 'detail', 'hint', 'fix', 'gap', 'misconception', 'concept'] as const;
 
 /** JSON schema for structured output (strict: every field required, no extras). */
 export const JUDGE_SCHEMA: Record<string, unknown> = {
@@ -41,6 +45,8 @@ export const JUDGE_SCHEMA: Record<string, unknown> = {
     detail: { type: 'string' },
     hint: { type: 'string' },
     fix: { type: 'string' },
+    step_kind: { type: 'string', enum: ['calculation', 'proof'] },
+    gap: { type: 'string' },
     misconception: { type: 'string' },
     concept: { type: 'string' },
   },
@@ -51,17 +57,20 @@ export interface AiVerify {
   readingOk: boolean;
   /** the step from the previous line(s) to this line is valid; null = cannot tell */
   valid: boolean | null;
+  /** for a proof step judged invalid: the specific logical gap */
+  gap: string;
   reason: string;
 }
 
 export const VERIFY_SCHEMA: Record<string, unknown> = {
   type: 'object',
   additionalProperties: false,
-  required: ['readingOk', 'work', 'valid', 'reason'],
+  required: ['readingOk', 'work', 'valid', 'gap', 'reason'],
   properties: {
     readingOk: { type: 'boolean' },
     work: { type: 'string' },
     valid: { type: 'string', enum: ['yes', 'no', 'unsure'] },
+    gap: { type: 'string' },
     reason: { type: 'string' },
   },
 };
@@ -182,7 +191,11 @@ export function parseAiJudge(text: string, localReading: string): AiJudge | null
     fix: verdict === 'error' ? str(pick(o, 'fix', 'correction')).slice(0, 400) : '',
     misconception: verdict === 'error' ? str(pick(o, 'misconception', 'tag')).toLowerCase().replace(/[^a-z-]/g, '').slice(0, 40) : '',
     concept: str(pick(o, 'concept', 'topic')).slice(0, 80),
+    proof: /proof|argument/i.test(str(pick(o, 'step_kind', 'stepKind', 'kind'))),
+    gap: verdict === 'ok' ? '' : str(pick(o, 'gap', 'logical_gap')).slice(0, 300),
   };
+  // a proof step is wrong only with a named gap; otherwise it is a question, not a verdict
+  if (j.proof && j.verdict === 'error' && !j.gap) j.verdict = 'unsure';
   // an "error" with no explanation at all is not actionable: treat as unsure
   if (j.verdict === 'error' && !j.title && !j.detail && !j.wrongSpan && !j.fix) j.verdict = 'unsure';
   return j;
@@ -197,7 +210,7 @@ export function parseAiVerify(text: string): AiVerify | null {
   const s = str(v).toLowerCase();
   const valid = v === true || /^(yes|true|valid|ok|correct)/.test(s) ? true : v === false || /^(no|false|invalid|wrong|error|incorrect)/.test(s) ? false : null;
   const ro = pick(o, 'readingOk', 'reading_ok');
-  return { readingOk: ro === undefined ? true : ro === true || /^(yes|true)/i.test(str(ro)), valid, reason: str(pick(o, 'reason', 'why')).slice(0, 400) };
+  return { readingOk: ro === undefined ? true : ro === true || /^(yes|true)/i.test(str(ro)), valid, gap: valid === false ? str(pick(o, 'gap', 'logical_gap')).slice(0, 300) : '', reason: str(pick(o, 'reason', 'why')).slice(0, 400) };
 }
 
 // ---- span mapping -------------------------------------------------------------------------------

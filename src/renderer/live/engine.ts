@@ -138,12 +138,18 @@ const median = (xs: number[]) => {
 /** Lines of a block the AI should judge in this mode (pure, exported for tests). */
 export function linesToJudge(mode: LiveMode, rec: BlockRecognition, local: LocalResult): LineRecognition[] {
   if (mode !== 'smart' && mode !== 'max') return [];
+  const provedLocally = (l: LineRecognition, i: number) =>
+    i > 0 && l.confidence >= POLICY.confidentReading && local.lines.find((x) => x.lineId === l.lineId)?.verdict === 'error' && local.issues.some((x) => x.lineId === l.lineId && x.severity === 'error' && x.confidence >= POLICY.confidentCas);
+  // the CAS proved a step wrong and it passes the red gate: the block is decided on this PC, and
+  // Smart sends nothing at all (nothing after a first error is marked anyway)
+  if (mode === 'smart' && rec.lines.some(provedLocally)) return [];
   const out: LineRecognition[] = [];
-  for (const l of rec.lines) {
+  for (const [i, l] of rec.lines.entries()) {
     const lc = local.lines.find((x) => x.lineId === l.lineId);
     const v = lc?.verdict ?? 'none';
-    // a confident local error is final; nothing after it is marked (first error only)
-    if (v === 'error' && l.confidence >= POLICY.confidentReading && local.issues.some((i) => i.lineId === l.lineId && i.severity === 'error' && i.confidence >= POLICY.confidentCas)) break;
+    if (provedLocally(l, i)) break;
+    // the first line has no premise: a definition or a given, never judged as a step
+    if (i === 0) continue;
     if (lc?.carried) continue;
     if (mode === 'max') {
       if (l.text || l.tokens.length) out.push(l);

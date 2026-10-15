@@ -31,6 +31,9 @@ export interface AiLineOutcome {
   corrected?: string;
   /** misconception tag for the mistake journal */
   misconception?: string;
+  /** a proof step (the proof ladder applies) and its named logical gap */
+  proof?: boolean;
+  gap?: string;
 }
 
 export interface AiOutcome {
@@ -144,8 +147,12 @@ function aiIssue(A: AiLineOutcome, severity: 'error' | 'unsure'): Issue {
  */
 export function enforceRedPolicy<T extends BlockCheck>(check: T): T {
   const conf = new Map(check.recognition.lines.map((l) => [l.lineId, l.confidence]));
+  // a block's first line (or a lone line) has no premise: it is a definition or a given ("a=3",
+  // "x=3"), not a step, so it is never red (a misread "a=3" as "0=3" must not turn red)
+  const premiseless = check.recognition.lines[0]?.lineId;
   const issues = check.issues.map((i) => {
     if (i.severity !== 'error') return i;
+    if (i.lineId === premiseless) return demote(i);
     const ok = i.source === 'ai-verified' || (i.source === 'local-cas' && (conf.get(i.lineId) ?? 0) >= CONFIDENT_READING && i.confidence >= CONFIDENT_CAS);
     return ok ? i : demote(i);
   });

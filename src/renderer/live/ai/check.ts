@@ -81,7 +81,7 @@ function linked(parent?: AbortSignal): AbortController {
 }
 
 async function runJudge(call: Caller, input: JudgeInput, extra = ''): Promise<{ j: AiJudge | null; tokens: Usage; model: string; provider?: ProviderId; truncated: boolean }> {
-  const prior = input.prior.slice(-POLICY.priorLines).map((l) => l.text || '?');
+  const prior = input.prior.slice(-POLICY.priorLines).map((l) => ({ text: l.text, latex: l.latex }));
   const r = await call(
     input.tier,
     {
@@ -99,7 +99,8 @@ async function runJudge(call: Caller, input: JudgeInput, extra = ''): Promise<{ 
 }
 
 async function runVerify(call: Caller, input: JudgeInput, reading: string, signal: AbortSignal, avoid?: ProviderId): Promise<{ v: AiVerify | null; tokens: Usage }> {
-  const prior = input.prior.slice(-POLICY.priorLines).map((l) => l.text || '?');
+  // maths goes as LaTeX (the canonical form: matrices, limits and cases exist only there)
+  const prior = input.prior.slice(-POLICY.priorLines).map((l) => l.latex || l.text || '?');
   const strong = input.verifyTier === 'strong';
   const r = await call(
     input.verifyTier,
@@ -130,11 +131,11 @@ export async function judgeLine(call: Caller, input: JudgeInput, hints: JudgeHin
     tokens.input += u.input;
     tokens.output += u.output;
   };
-  const isMath = input.line.kind === 'math' || looksMath(input.line.text);
+  const localTex = input.line.latex || input.line.text;
   const vCtrl = linked(input.signal);
   // the blind re-solve starts now, on the local reading, before the judge has said anything
   let verifyP: Promise<{ v: AiVerify | null; tokens: Usage } | null> | null =
-    POLICY.verifyInParallel && isMath ? runVerify(call, input, input.line.text, vCtrl.signal, hints.judgeProvider).catch((e) => (vCtrl.signal.aborted && !input.signal?.aborted ? null : Promise.reject(e))) : null;
+    POLICY.verifyInParallel ? runVerify(call, input, localTex, vCtrl.signal, hints.judgeProvider).catch((e) => (vCtrl.signal.aborted && !input.signal?.aborted ? null : Promise.reject(e))) : null;
   // a verify failure must not surface as an unhandled rejection while the judge runs
   verifyP?.catch(() => undefined);
 
@@ -157,6 +158,8 @@ export async function judgeLine(call: Caller, input: JudgeInput, hints: JudgeHin
     return null;
   }
   const reading = j.corrected || input.line.text;
+  const same = (a: string, b: string) => a.replace(/\s+/g, '') === b.replace(/\s+/g, '');
+  const corrected = !!j.corrected && !same(j.corrected, input.line.text) && !same(j.corrected, input.line.latex);
   const outcome: AiLineOutcome = {
     lineId: input.line.lineId,
     verdict: j.verdict,
@@ -170,6 +173,8 @@ export async function judgeLine(call: Caller, input: JudgeInput, hints: JudgeHin
     hint: j.hint,
     fix: j.fix,
     misconception: normMisconception(j.misconception) || undefined,
+    proof: j.proof || undefined,
+    gap: j.gap || undefined,
   };
   if (j.verdict !== 'error') {
     vCtrl.abort();
@@ -194,10 +199,10 @@ export async function judgeLine(call: Caller, input: JudgeInput, hints: JudgeHin
   input.onJudged?.({ ...outcome });
 
   // the parallel re-solve judged the local reading; if the judge corrected it, re-solve that reading
-  if (!verifyP || (j.corrected && j.corrected.replace(/\s+/g, '') !== input.line.text.replace(/\s+/g, ''))) {
+  if (!verifyP || corrected) {
     vCtrl.abort();
     const c2 = linked(input.signal);
-    verifyP = runVerify(call, input, reading, c2.signal, judged.provider ?? hints.judgeProvider);
+    verifyP = runVerify(call, input, j.corrected || localTex, c2.signal, judged.provider ?? hints.judgeProvider);
   }
   let verify: AiVerify | null = null;
   try {
@@ -211,8 +216,11 @@ export async function judgeLine(call: Caller, input: JudgeInput, hints: JudgeHin
     // no second opinion: the line stays unconfirmed (amber)
   }
   if (verify) {
-    if (verify.valid === false && verify.readingOk) outcome.confirmed = true;
+    // a proof step: both must name a logical gap (the judge always does, see parseAiJudge)
+    if (verify.valid === false && verify.readingOk && (!j.proof || !!verify.gap)) outcome.confirmed = true;
     else if (verify.valid === true) outcome.refuted = true;
   }
+  // an unconfirmed proof objection becomes a precise question, not a verdict
+  if (j.proof && !outcome.confirmed && j.hint) outcome.detail = j.hint;
   return { outcome, concept: j.concept, tokens, model: judged.model, verify };
 }

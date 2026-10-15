@@ -260,8 +260,9 @@ test('Smart: undecided lines are judged one by one, cached; red only after the b
   s.add(write('2x+3=7', 0));
   s.add(write('2x=10', 1));
   await settle();
-  // one judge call per undecided line; the parallel re-solve disagreed on line 2: never red
-  assert.equal(p.judges().length, 2);
+  // one judge call per undecided step (the first line is a given, never judged); the parallel
+  // re-solve disagreed on line 2: never red
+  assert.equal(p.judges().length, 1);
   assert.ok(p.judges().every((c) => /Recogniser reading of the new step/.test(c.user)));
   assert.ok(!kinds(e).includes('error'));
   const st = e.stats();
@@ -295,6 +296,7 @@ test('Smart: undecided lines are judged one by one, cached; red only after the b
 test('Smart skips lines the CAS decided; Max judges them too', async () => {
   const { s, e, p } = setup('smart', standard(() => true));
   s.add(write('1+1=2', 0));
+  s.add(write('1+1=2', 1));
   await settle();
   assert.equal(p.calls.length, 0);
   e.setMode('max');
@@ -331,10 +333,11 @@ test('first error only; a carried line gets no mark', async () => {
 test('a block that changes while its AI check runs is cancelled; the stale result is dropped', async () => {
   casKnows = false;
   const { s, e, p } = setup('smart', standard(() => true), { latency: 300 });
-  s.add(write('2x=10', 0));
+  s.add(write('2x+3=7', 0));
+  s.add(write('2x=10', 1));
   await sleep(110);
   assert.ok(p.calls.length >= 1);
-  s.add(write('+', 1));
+  s.add(write('+', 2));
   await sleep(20);
   assert.ok(p.calls.every((c) => c.signal?.aborted), 'every call of the old block was aborted');
   await sleep(1000);
@@ -349,9 +352,10 @@ test('offline: the local verdict stands and the pill says so', async () => {
   const ai = new LiveAi({ settings, complete: (async () => { throw new Error('Could not reach the AI provider: dns error'); }) as never, listModels: async () => [], kv: null });
   const e = new LiveEngine(s, { mode: 'smart', recog: recog as never, math: math as never, ai, crop: fakeCrop, idle: (fn) => (setTimeout(fn, 0), () => {}), settleMs: 20, redMinMs: 0, kv: null });
   e.decorations('p1');
-  s.add(write('2x=10', 0));
+  s.add(write('2x+3=7', 0));
+  s.add(write('2x=10', 1));
   await settle();
-  assert.deepEqual(kinds(e), ['unsure']);
+  assert.deepEqual(kinds(e), ['unsure', 'unsure']);
   assert.equal(e.stats().state, 'offline');
   e.dispose();
   casKnows = true;
@@ -360,16 +364,20 @@ test('offline: the local verdict stands and the pill says so', async () => {
 test('recheck with a corrected reading uses the text and the CAS', async () => {
   recog.conf = 0.5; // shaky reading: a local error alone is only amber
   const { s, e } = setup('local', () => '');
-  s.add(write('2x=1O', 0)); // misread "10" as "1O"
-  await settle();
-  const b = e.blockFor('p1', [0, 0, 999, 999])!;
-  assert.deepEqual(kinds(e), ['unsure']);
-  const c = await e.recheck(b.id, '2x=10');
-  assert.equal(c?.lines[0].verdict, 'error');
-  assert.equal(c?.recognition.lines[0].text, '2x=10');
-  assert.deepEqual(kinds(e), ['error']);
-  recog.conf = 0.95;
-  e.dispose();
+  try {
+    s.add(write('2x+3=7', 0));
+    s.add(write('2x=1O', 1)); // misread "10" as "1O"
+    await settle();
+    const b = e.blockFor('p1', [0, 0, 999, 999])!;
+    assert.ok(!kinds(e).includes('error'));
+    const c = await e.recheck(b.id, '2x=10', b.lines[1].id);
+    assert.equal(c?.lines[1].verdict, 'error');
+    assert.equal(c?.recognition.lines[1].text, '2x=10');
+    assert.ok(kinds(e).includes('error'));
+  } finally {
+    recog.conf = 0.95;
+    e.dispose();
+  }
 });
 
 test('live results after a trailing "=", with variables from earlier lines', async () => {
@@ -449,7 +457,9 @@ test('deictic: "why?" refers to the block under the pen, else the one written in
 });
 
 test('mode gating and geometry helpers', () => {
-  const rec = (kind: 'math' | 'text', confidence = 0.95) => ({ blockId: 'b', ms: 0, lines: [{ lineId: 'l', kind, text: 't', latex: '', confidence, alternates: [], tokens: [], source: 'local-ink' as const }] });
+  // a premise line first: the first line of a block is a given and never judged
+  const line0 = { lineId: 'p', kind: 'math' as const, text: 'p', latex: '', confidence: 1, alternates: [], tokens: [], source: 'local-ink' as const };
+  const rec = (kind: 'math' | 'text', confidence = 0.95) => ({ blockId: 'b', ms: 0, lines: [line0, { lineId: 'l', kind, text: 't', latex: '', confidence, alternates: [], tokens: [], source: 'local-ink' as const }] });
   const loc = (v: 'ok' | 'error' | 'unsure' | 'none', carried = false) => ({ lines: [{ lineId: 'l', verdict: v, carried }], issues: v === 'error' ? [{ lineId: 'l', span: null, severity: 'error' as const, title: '', detail: '', source: 'local-cas' as const, confidence: 0.99 }] : [] });
   assert.equal(needsAi('local', rec('math'), loc('unsure')), false);
   assert.equal(needsAi('off', rec('math'), loc('unsure')), false);
@@ -461,6 +471,8 @@ test('mode gating and geometry helpers', () => {
   assert.equal(needsAi('smart', rec('math'), loc('unsure', true)), false, 'carried lines are not judged');
   assert.equal(needsAi('max', rec('text'), loc('none')), true);
   assert.equal(linesToJudge('max', rec('math', 0.95), loc('error')).length, 0, 'a proven error is final even in Max');
+  const lone = { blockId: 'b', ms: 0, lines: [{ ...line0, lineId: 'l' }] };
+  assert.equal(needsAi('smart', lone, loc('unsure')), false, 'a lone line is a given, not a step');
   const line = { id: 'l', pageId: 'p', strokeIds: [], bbox: [0, 0, 100, 20] as BBox };
   const g = markGeometry(line, undefined, null);
   assert.deepEqual([g.underline.x1, g.underline.x2], [0, 100]);

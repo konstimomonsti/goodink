@@ -101,7 +101,7 @@ test('garbage is null, never a guess', () => {
 });
 
 test('verification replies parse, including loose forms', () => {
-  assert.deepEqual(J.parseAiVerify('{"readingOk":true,"work":"7-3=4","valid":"no","reason":"7-3 is 4"}'), { readingOk: true, valid: false, reason: '7-3 is 4' });
+  assert.deepEqual(J.parseAiVerify('{"readingOk":true,"work":"7-3=4","valid":"no","reason":"7-3 is 4"}'), { readingOk: true, valid: false, gap: '', reason: '7-3 is 4' });
   assert.equal(J.parseAiVerify('{"valid":"yes"}')?.valid, true);
   assert.equal(J.parseAiVerify('{"valid":"unsure","readingOk":false}')?.valid, null);
   assert.equal(J.parseAiVerify('{"valid":false,"readingOk":"no"}')?.readingOk, false);
@@ -137,17 +137,18 @@ test('lines are aligned by position or by similarity', () => {
 
 // ---- merge policy -------------------------------------------------------------------------------
 
+// every block starts with a premise line 'p0' (a block's first line is a given, never red)
 const rec = (lines: { id: string; text: string; conf: number; kind?: 'math' | 'text' }[]) => ({
   blockId: 'b',
   ms: 1,
-  lines: lines.map((l) => ({ lineId: l.id, kind: l.kind ?? 'math', text: l.text, latex: l.text, confidence: l.conf, alternates: [], tokens: [], source: 'local-ink' as const })),
+  lines: [{ id: 'p0', text: 'given', conf: 1 }, ...lines].map((l) => ({ lineId: l.id, kind: l.kind ?? 'math', text: l.text, latex: l.text, confidence: l.conf, alternates: [], tokens: [], source: 'local-ink' as const })),
 });
 const casIssue = (lineId: string, confidence = 0.97) => ({ lineId, span: [0, 1] as [number, number], severity: 'error' as const, title: 'Wrong', detail: 'd', source: 'local-cas' as const, confidence });
 const aiLine = (lineId: string, verdict: 'ok' | 'error' | 'unsure', confirmed = false, refuted = false) => ({ lineId, verdict, confirmed, refuted, reading: 'r', span: null, title: verdict === 'ok' ? '' : 'T', detail: verdict === 'ok' ? '' : 'D', hint: 'h', fix: 'f' });
 const ai = (lines: ReturnType<typeof aiLine>[]) => ({ lines, concept: 'c', finalAnswer: '', tokens: { input: 10, output: 5 }, model: 'm', cached: false });
 const merge = (r: ReturnType<typeof rec>, local: { lines: { lineId: string; verdict: 'ok' | 'error' | 'unsure' | 'none' | 'pending' }[]; issues: ReturnType<typeof casIssue>[] }, a: ReturnType<typeof ai> | null) =>
   M.mergeCheck({ blockId: 'b', pageId: 'p', recognition: r, local, ai: a, ms: 1, via: a ? 'ai' : 'local' });
-const verdicts = (c: { lines: { verdict: string }[] }) => c.lines.map((l) => l.verdict);
+const verdicts = (c: { lines: { lineId: string; verdict: string }[] }) => c.lines.filter((l) => l.lineId !== 'p0').map((l) => l.verdict);
 
 test('CAS error on a confident reading is red and final, whatever the AI says', () => {
   const c = merge(rec([{ id: 'a', text: '2x=10', conf: 0.95 }]), { lines: [{ lineId: 'a', verdict: 'error' }], issues: [casIssue('a')] }, ai([aiLine('a', 'ok')]));

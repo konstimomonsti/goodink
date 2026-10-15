@@ -1,38 +1,48 @@
 // Prompt templates for live checking (judge), blind verification, tutoring answers, the AI selector
 // and voice. System prompts are static so they stay a cacheable prefix; everything that varies goes
-// in the user turn. Tunables live in ./policy.ts (which re-exports this file).
+// in the user turn. Tunables live in ./policy.ts (which re-exports this file). Scope: everything a
+// mathematics degree needs (ARCHITECTURE.md §D); maths is always exchanged as LaTeX.
 
 // ---- judge --------------------------------------------------------------------------------------
 
 /**
- * The cloud JUDGES, it does not read: the local recogniser's reading arrives as text with a crop of
- * just this line, and the model confirms or corrects the reading, then judges the step against the
- * earlier steps (text). Specialised local readers beat frontier VLMs at handwritten maths, so the
- * model is asked to correct the reading only when the image clearly shows something else.
+ * The cloud JUDGES, it does not read: the local recogniser's reading arrives as LaTeX with a crop of
+ * just this line (or 2-D structure), and the model confirms or corrects the reading, then judges the
+ * step against the earlier steps (LaTeX). Specialised local readers beat frontier VLMs at handwritten
+ * maths, so the model corrects the reading only when the image clearly shows something else.
+ * Proof steps are judged as proofs: an "error" there must name one specific logical gap.
  */
-export const JUDGE_SYSTEM = `You check one step of a student's handwritten maths, like a careful teacher who only marks what is certainly wrong.
-Input: the earlier steps as text (already checked), a local recogniser's reading of the new step (text and LaTeX), and an image of the new step's handwriting.
-1. reading_ok: true if the image shows the recogniser's reading (ignore spacing and notation style). If the image clearly shows something else, false, and give the right reading in "corrected" (plain linear text like 2x+3=7, x^2-4=(x-2)(x+2), sqrt(x)=3). Otherwise "corrected" is "".
-2. Judge the step as written (corrected if you corrected it), only against the earlier steps:
-   verdict "ok": correct, or follows correctly from the earlier steps (an equivalent rewrite, the same operation on both sides, a correct evaluation). Unfinished work is fine.
-   verdict "error": only if you are certain it is mathematically wrong or does not follow.
-   verdict "unsure": the handwriting is ambiguous, or you cannot decide.
-3. For "error" or "unsure":
+export const JUDGE_SYSTEM = `You check one step of a student's handwritten maths, like a careful university teacher who only marks what is certainly wrong. Any level: school algebra to a full mathematics degree (analysis, linear and abstract algebra, ε-δ arguments, induction, quantifier logic, probability).
+Input: the earlier steps as LaTeX (already checked), a local recogniser's reading of the new step (LaTeX and linear text), and an image of the new step's handwriting (a matrix, integral with limits, cases or aligned derivation is shown whole).
+1. reading_ok: true if the image shows the recogniser's reading (ignore spacing and notation style). If the image clearly shows something else, false, and give the right reading in "corrected" as LaTeX. Otherwise "corrected" is "".
+2. step_kind: "proof" for a step of a proof or argument (claims, quantifiers, "assume", "hence", "by induction", "let ε>0", set or group properties); otherwise "calculation".
+3. Judge the step as written (corrected if you corrected it), only against the earlier steps and standard definitions and theorems:
+   verdict "ok": correct, or follows correctly from the earlier steps. Unfinished work is fine.
+   verdict "error": only if you are certain it is wrong or does not follow. For a proof step, also only if you can name one specific logical gap in "gap" (e.g. "the induction step assumes P(k+1)", "the order of ∀ε ∃δ is swapped", "δ depends on x", "uses commutativity in a group not known to be abelian", "divides by a possibly zero determinant").
+   verdict "unsure": the handwriting is ambiguous, the step is not fully justified but not clearly wrong, or you cannot decide.
+4. For "error" or "unsure":
    wrong_span: the shortest exact substring of the step's reading that is wrong (e.g. "10", "-3", "x^2"), or "".
-   title: 2 to 4 words naming the mistake (e.g. "Sign error"). detail: one sentence saying what is wrong without giving the correct result, maths in $...$.
-   hint: for "error", a question that nudges towards the mistake without revealing the answer. fix: for "error", the corrected step in LaTeX.
-   misconception: for "error", one tag: sign-move, distribute-first-term, square-of-sum, cancel-terms, divide-one-side, sqrt-of-sum, exponent-product, fraction-add-denominators, order-of-operations, arithmetic, inverse-operation, inequality-flip, power-rule, derivative, log-rule, function-linearity, like-terms, dropped-term, extra-term, other.
+   title: 2 to 4 words naming the mistake (e.g. "Sign error", "Quantifier order"). detail: one sentence saying what is wrong without giving the correct result, maths in $...$.
+   hint: a question that nudges towards the problem without revealing the answer (for a proof: a precise question about the missing justification). fix: for "error", the corrected step in LaTeX.
+   gap: for a proof step, the specific logical gap in one sentence; otherwise "".
+   misconception: for "error", one tag: sign-move, distribute-first-term, square-of-sum, cancel-terms, divide-one-side, sqrt-of-sum, exponent-product, fraction-add-denominators, order-of-operations, arithmetic, inverse-operation, inequality-flip, power-rule, derivative, log-rule, function-linearity, like-terms, dropped-term, extra-term, proof-gap, other.
    For "ok" all of these are "".
-4. concept: the topic in 2 to 4 words.
+5. concept: the topic in 2 to 4 words.
 Examples:
-earlier: 2x+3=7 | step: 2x=10 -> {"reading_ok":true,"corrected":"","latex":"2x=10","verdict":"error","wrong_span":"10","title":"Subtraction error","detail":"Moving $+3$ across should subtract it from $7$.","hint":"What is $7-3$?","fix":"2x=4","misconception":"sign-move","concept":"Linear equations"}
-earlier: (none) | step: (a+b)^2=a^2+b^2 -> {"reading_ok":true,"corrected":"","latex":"(a+b)^2=a^2+b^2","verdict":"error","wrong_span":"a^2+b^2","title":"Missing middle term","detail":"Squaring a sum does not square each term separately.","hint":"Write $(a+b)^2$ as $(a+b)(a+b)$ and multiply out.","fix":"(a+b)^2=a^2+2ab+b^2","misconception":"square-of-sum","concept":"Binomial expansion"}
-earlier: x^2=9 | step: x=3 (image shows x=±3) -> {"reading_ok":false,"corrected":"x=±3","latex":"x=\\\\pm 3","verdict":"ok","wrong_span":"","title":"","detail":"","hint":"","fix":"","misconception":"","concept":"Quadratic equations"}
+earlier: 2x+3=7 | step: 2x=10 -> {"reading_ok":true,"corrected":"","latex":"2x=10","step_kind":"calculation","verdict":"error","wrong_span":"10","title":"Subtraction error","detail":"Moving $+3$ across should subtract it from $7$.","hint":"What is $7-3$?","fix":"2x=4","gap":"","misconception":"sign-move","concept":"Linear equations"}
+earlier: (none) | step: (a+b)^2=a^2+b^2 -> {"reading_ok":true,"corrected":"","latex":"(a+b)^2=a^2+b^2","step_kind":"calculation","verdict":"error","wrong_span":"a^2+b^2","title":"Missing middle term","detail":"Squaring a sum does not square each term separately.","hint":"Write $(a+b)^2$ as $(a+b)(a+b)$ and multiply out.","fix":"(a+b)^2=a^2+2ab+b^2","gap":"","misconception":"square-of-sum","concept":"Binomial expansion"}
+earlier: x^2=9 | step: x=3 (image shows x=±3) -> {"reading_ok":false,"corrected":"x=\\\\pm 3","latex":"x=\\\\pm 3","step_kind":"calculation","verdict":"ok","wrong_span":"","title":"","detail":"","hint":"","fix":"","gap":"","misconception":"","concept":"Quadratic equations"}
+earlier: \\\\text{Assume } P(k) \\\\text{ holds.} | step: \\\\text{Then } P(k+1) \\\\text{ holds, so } \\\\sum_{i=1}^{k+1} i = \\\\tfrac{(k+1)(k+2)}{2} -> {"reading_ok":true,"corrected":"","latex":"...","step_kind":"proof","verdict":"error","wrong_span":"","title":"Step not shown","detail":"The step concludes $P(k+1)$ without deriving it from $P(k)$.","hint":"How can you write $\\\\sum_{i=1}^{k+1} i$ using $\\\\sum_{i=1}^{k} i$?","fix":"\\\\sum_{i=1}^{k+1} i = \\\\tfrac{k(k+1)}{2} + (k+1) = \\\\tfrac{(k+1)(k+2)}{2}","gap":"The induction step asserts P(k+1) instead of deriving it from P(k).","misconception":"proof-gap","concept":"Induction"}
 Reply with the JSON object only.`;
 
-export function judgeUser(prior: string[], reading: string, latex: string): string {
-  const earlier = prior.length ? prior.map((p, i) => `${i + 1}. ${p}`).join('\n') : '(none: judge the step on its own)';
-  return `Earlier steps:\n${earlier}\n\nRecogniser reading of the new step:\ntext: ${reading || '?'}\nlatex: ${latex || reading || '?'}`;
+export interface PriorStep {
+  text: string;
+  latex: string;
+}
+
+export function judgeUser(prior: PriorStep[], reading: string, latex: string): string {
+  const earlier = prior.length ? prior.map((p, i) => `${i + 1}. ${p.latex || p.text || '?'}`).join('\n') : '(none: judge the step on its own)';
+  return `Earlier steps (LaTeX):\n${earlier}\n\nRecogniser reading of the new step:\nlatex: ${latex || reading || '?'}\ntext: ${reading || '?'}`;
 }
 
 /**
@@ -59,6 +69,7 @@ export const MISCONCEPTIONS: Record<string, { label: string; rule: string }> = {
   'like-terms': { label: 'Combining unlike terms', rule: 'Only like terms combine: $3x+2x=5x$, but $3x+2$ and $x^2+x$ stay as they are.' },
   'dropped-term': { label: 'Dropped a term', rule: 'When you rewrite a line, carry every term across; count the terms before and after.' },
   'extra-term': { label: 'Extra term', rule: 'A rewrite must not add terms out of nowhere; check each term comes from the line above.' },
+  'proof-gap': { label: 'Gap in a proof', rule: 'Each line of a proof must follow from earlier lines, the hypotheses or a named definition or theorem; say which one you use.' },
   other: { label: 'Other mistakes', rule: 'Check each step against the one before it: does it say the same thing?' },
 };
 
@@ -72,16 +83,17 @@ export function normMisconception(tag: string): string {
 
 /**
  * The verifier never sees the judge's verdict: it gets the image, the earlier steps and the step's
- * reading, and must work the step out itself. It runs in parallel with the judge, ideally on another
- * vendor's model, so the two errors are uncorrelated.
+ * reading, and must work the step out (or, for a proof step, critique it) itself. It runs in
+ * parallel with the judge, ideally on another vendor's model, so the two errors are uncorrelated.
  */
-export const VERIFY_SYSTEM = `You verify one step of a student's handwritten maths, independently.
-You get the earlier steps as text, a transcription of the step to verify, and an image of that step.
+export const VERIFY_SYSTEM = `You verify one step of a student's handwritten maths independently, at any level up to a mathematics degree.
+You get the earlier steps as LaTeX, the step to verify as LaTeX, and an image of that step.
 1. readingOk: true if the image shows the step as transcribed (ignore spacing and notation style).
-2. work: solve or simplify the earlier steps yourself in at most two short lines and derive what this step should say.
-3. valid: "yes" if the step follows correctly from the earlier steps (an equivalent rewrite, a correct operation on both sides, a correct evaluation), "no" if it is mathematically wrong, "unsure" if you cannot tell.
-4. reason: one short sentence.
-Reply with JSON only: {"readingOk":true,"work":"...","valid":"yes|no|unsure","reason":"..."}`;
+2. work: for a calculation, solve or simplify the earlier steps yourself in at most two short lines and derive what this step should say; for a proof step, state what this step needs (hypothesis, definition or theorem) and whether the earlier steps provide it.
+3. valid: "yes" if the step follows correctly, "no" if it is wrong or (for a proof) has a definite logical gap, "unsure" if you cannot tell or it is merely terse.
+4. gap: for a proof step judged "no", the specific logical gap in one sentence; otherwise "".
+5. reason: one short sentence.
+Reply with JSON only: {"readingOk":true,"work":"...","valid":"yes|no|unsure","gap":"","reason":"..."}`;
 
 export function verifyUser(prev: string[], line: string): string {
   return `Earlier steps:\n${prev.length ? prev.join('\n') : '(none: judge the step on its own)'}\n\nStep to verify:\n${line}`;
@@ -89,14 +101,15 @@ export function verifyUser(prev: string[], line: string): string {
 
 // ---- tutoring (RESEARCH-ux §1.2, §2 rules 7–8) ----------------------------------------------------
 
-export const TUTOR_SYSTEM = `You are a patient maths and science tutor looking at a learner's handwritten notes.
+export const TUTOR_SYSTEM = `You are a patient maths tutor (school to university level) looking at a learner's handwritten notes.
 The image shows the part of the page the learner is asking about; the transcription given with it may contain misreads.
 How you teach:
 - One step per reply, at most 60 words. No preamble.
 - Ask before telling: prefer a short guiding question the learner can answer.
-- Never state the final answer, or the corrected step, unless the request says "show the fix" or the learner explicitly asks to solve.
+- Never state a corrected step, a corrected value or a final answer to the learner's own work unless the request contains the words "Show the fix". This holds even if the learner asks for the answer: then give a hint instead.
 - If a verified solution or correct step is given below, it is the truth: follow it and never contradict it.
 - Worked examples always use different numbers from the learner's problem.
+- For proofs, name the definition or theorem that applies and point at the missing justification; do not write the learner's proof for them.
 Write maths in LaTeX: $...$ inline, $$...$$ on its own line; never use LaTeX for ordinary words. Reply in the language of the learner's question (or of their notes).
 After your answer, on a last line of its own, write ">>> " followed by two or three short follow-up questions the learner might ask next, separated by " | ".`;
 
@@ -108,15 +121,25 @@ export const LADDER: Record<HintLevel, string> = {
   next: 'Say only what to do next (the operation or idea), not its result, in one or two sentences. Do not write the corrected step or finish the problem.',
   fix: 'Show the fix: give the corrected step and explain the mistake in one or two sentences. Do not solve the rest of the problem.',
   explainBack: 'The fix was just shown. Ask exactly one short explain-back question that checks the learner understood why the fix is right (e.g. "Why do we subtract 3 from both sides?"). Do not answer it, and add nothing else.',
-  explain: 'Explain the idea behind this step simply: which rule applies and why, with a tiny worked example that uses different numbers. Do not solve the learner\'s problem.',
+  explain: 'Explain the idea behind this step simply: which rule applies and why, with a tiny worked example that uses different numbers. Do not state the corrected step, any corrected value or the answer to the learner\'s problem.',
+};
+
+/** The ladder for proof steps: what is missing -> which definition or theorem applies -> the next line. */
+export const PROOF_LADDER: Record<HintLevel, string> = {
+  hint: 'Say what is missing in this proof step (which claim is not yet justified), as a short question. Do not write the missing argument.',
+  next: 'Name the definition, hypothesis or theorem that closes the gap and what it gives here, in one or two sentences. Do not write the proof line.',
+  fix: 'Show the fix: write the next correct line of the proof (LaTeX) and say in one sentence why it follows. Do not finish the proof.',
+  explainBack: LADDER.explainBack,
+  explain: 'Explain the idea of this proof step: which definition or theorem is used and why it applies, with a tiny example (different objects). Do not write the learner\'s proof.',
 };
 
 export type QuickActionId = 'explain' | 'check' | 'solve' | 'summarise' | 'translate' | 'flashcards';
 
 export const QUICK_ACTIONS: { id: QuickActionId; label: string; prompt: string }[] = [
-  { id: 'explain', label: 'Explain', prompt: 'Explain what this shows, simply and briefly.' },
+  { id: 'explain', label: 'Explain', prompt: 'Explain what this shows, simply and briefly. Do not correct the learner\'s work or state corrected values.' },
   { id: 'check', label: 'Check my work', prompt: 'Check this work step by step. Say which step is the first wrong one (if any) and why, without solving the rest for me.' },
-  { id: 'solve', label: 'Solve step by step', prompt: 'The learner explicitly asks to solve this: solve it step by step, one short line per step, and state the final answer.' },
+  // only offered for material that is not the learner's own marked work (the UI routes marked work to the card)
+  { id: 'solve', label: 'Solve step by step', prompt: 'Show the fix: solve this given problem step by step, one short line per step, and state the final answer.' },
   { id: 'summarise', label: 'Summarise', prompt: 'Summarise this in at most five short bullet points.' },
   { id: 'translate', label: 'Translate', prompt: 'Translate the text in this region into English (or into German if it is already English). Keep formulas as they are.' },
   { id: 'flashcards', label: 'Make flashcards', prompt: 'Make flashcards from this.' },
@@ -126,23 +149,38 @@ export interface IssueBrief {
   title: string;
   detail: string;
   lineText: string;
-  /** the corrected step, verified by the CAS or confirmed by two models */
+  /** the corrected step, verified by the CAS or confirmed by two models (only once Show fix is unlocked) */
   fix?: string;
+  /** a proof step: the proof ladder applies */
+  proof?: boolean;
+  /** the specific logical gap of a proof step */
+  gap?: string;
 }
 
 /**
  * What the learner's request becomes for a ladder level or quick action. `grounding` (the CAS's
- * correct step or solution) is passed so the model cannot invent the maths (Kestin et al. 2025).
+ * correct step or solution) is passed so the model cannot invent the maths (Kestin et al. 2025);
+ * callers pass it, and issue.fix, only once Show fix is unlocked.
  */
 export function questionFor(opts: { question?: string; level?: HintLevel; action?: QuickActionId; issue?: IssueBrief; grounding?: string }): string {
   const parts: string[] = [];
-  if (opts.issue) parts.push(`The checker found a mistake in the step "${opts.issue.lineText}": ${opts.issue.title}. ${opts.issue.detail}`.trim());
+  if (opts.issue) parts.push(`The checker found a problem in the step "${opts.issue.lineText}": ${opts.issue.title}. ${opts.issue.detail}${opts.issue.gap ? ` Gap: ${opts.issue.gap}` : ''}`.trim());
   const truth = opts.grounding || opts.issue?.fix;
   if (truth) parts.push(`Verified correct step (for you; reveal it only when showing the fix): ${truth}`);
-  if (opts.level) parts.push(opts.level === 'fix' ? `Show the fix. ${LADDER.fix}` : LADDER[opts.level]);
+  const ladder = opts.issue?.proof ? PROOF_LADDER : LADDER;
+  if (opts.level) parts.push(opts.level === 'fix' ? ladder.fix : ladder[opts.level]);
   if (opts.action) parts.push(QUICK_ACTIONS.find((a) => a.id === opts.action)?.prompt ?? '');
   if (opts.question?.trim()) parts.push(`The learner asks: ${opts.question.trim()}`);
   return parts.filter(Boolean).join('\n') || 'Explain this.';
+}
+
+/** A request that asks for the answer instead of help (the ladder answers it with a hint first). */
+export const ANSWER_SEEKING = /\b(answers?|solutions?|solve|result|tell me|just (give|tell|show)|what('?s| is) (x|y|z|the (answer|result|value))|correct (step|line|value|version)|fix it|do it for me|l[öo]sung|l[öo]s(e|en)|antwort|ergebnis|sag (mir|es))\b/i;
+
+/** The ladder's reply to an answer-seeking request while Show fix is still locked. */
+export function ladderLockedReply(unlockInMs: number): string {
+  const s = Math.ceil(unlockInMs / 1000);
+  return s > 0 ? `Try the hint first. Show fix unlocks in ${s} s.` : 'Try the hint first. Show fix unlocks after one hint.';
 }
 
 /** Split the trailing ">>> a | b | c" follow-up line off an answer (also while it is still streaming). */
