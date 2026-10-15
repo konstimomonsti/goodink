@@ -148,8 +148,12 @@ export function linesToJudge(mode: LiveMode, rec: BlockRecognition, local: Local
     const lc = local.lines.find((x) => x.lineId === l.lineId);
     const v = lc?.verdict ?? 'none';
     if (provedLocally(l, i)) break;
-    // the first line has no premise: a definition or a given, never judged as a step
-    if (i === 0) continue;
+    // the first line has no premise: a definition or a given, never judged as a step. Except in
+    // Smart, a shakily read "…=" asking for a live result: the better model reads it
+    if (i === 0) {
+      if (mode === 'smart' && l.kind === 'math' && /=\s*$/.test(l.text) && l.confidence < POLICY.confidentReading) out.push(l);
+      continue;
+    }
     if (lc?.carried) continue;
     if (mode === 'max') {
       if (l.text || l.tokens.length) out.push(l);
@@ -178,6 +182,8 @@ export function markGeometry(line: InkLine, rec: LineRecognition | undefined, sp
 /** Assignments like "a=3" or "r = 2.5" in recognised lines: variables for live results. */
 function assignments(lines: readonly LineRecognition[], into: Map<string, string>) {
   for (const l of lines) {
+    // a variable read shakily ("a" vs "0") would put a wrong value into every later result
+    if (l.confidence < POLICY.confidentReading) continue;
     const m = /^\s*([A-Za-z])\s*=\s*([-+]?[\d.,/]+)\s*$/.exec(l.text);
     if (m) into.set(m[1], m[2]);
   }
@@ -743,10 +749,34 @@ export class LiveEngine {
     return vars;
   }
 
-  private evaluate(pageId: string, block: InkBlock, rec: BlockRecognition) {
+  /**
+   * Live results after "=". A result is shown only when this PC is sure of the reading (or the AI
+   * corrected it): a wrong answer written next to the learner's work is as bad as a false red.
+   * A shaky assignment earlier in the block withholds the results that use its variable.
+   */
+  private evaluate(pageId: string, block: InkBlock, rec: BlockRecognition, ai?: AiOutcome) {
     if (typeof this.math.evaluate !== 'function') return [];
+    const read = (l: LineRecognition): LineRecognition => {
+      const a = ai?.lines.find((x) => x.lineId === l.lineId);
+      if (a?.corrected && !this.corrections.has(l.lineId)) return { ...l, text: a.corrected, latex: '', confidence: 1 };
+      // judged without a correction: the AI confirmed this reading
+      if (a) return { ...l, confidence: Math.max(l.confidence, POLICY.confidentReading) };
+      return l;
+    };
+    const lines = rec.lines.map(read);
+    const shakyVars = new Set<string>();
+    for (const l of lines) {
+      const m = /^\s*([A-Za-z])\s*=/.exec(l.text);
+      if (m && l.confidence < POLICY.confidentReading) shakyVars.add(m[1]);
+    }
+    const usesShaky = (t: string) => [...shakyVars].some((v) => new RegExp(`(^|[^A-Za-z])${v}([^A-Za-z]|$)`).test(t.replace(/=\s*$/, '')));
     try {
-      return this.math.evaluate(rec.lines, this.pageVars(pageId, block));
+      return this.math
+        .evaluate(lines, this.pageVars(pageId, block))
+        .filter((r) => {
+          const l = lines.find((x) => x.lineId === r.lineId);
+          return !!l && l.confidence >= POLICY.confidentReading && !usesShaky(l.text);
+        });
     } catch (e) {
       console.warn('live: evaluate failed', e);
       return [];
@@ -809,7 +839,7 @@ export class LiveEngine {
       if (ctrl.signal.aborted || !this.current(pageId, blockId)) return;
       const outs = [...done.map((d) => d.outcome), ...[...partials.values()].filter((p) => !done.some((d) => d.outcome.lineId === p.lineId))];
       const agg: AiOutcome = { ...aggregate(done, false), lines: outs };
-      this.publish(pageId, block, mergeCheck({ blockId, pageId, recognition: this.withAiReadings(rec, agg), local, ai: agg, ms: Math.round(this.now() - t0), via: 'ai' }), rec, false, undefined, results);
+      this.publish(pageId, block, mergeCheck({ blockId, pageId, recognition: this.withAiReadings(rec, agg), local, ai: agg, ms: Math.round(this.now() - t0), via: 'ai' }), rec, false, undefined, this.evaluate(pageId, block, rec, agg));
     };
     try {
       await Promise.all(
@@ -850,7 +880,7 @@ export class LiveEngine {
       const ms = Math.round(this.now() - t0);
       const out = done.length ? aggregate(done, done.every((d) => cachedLines.includes(d))) : null;
       const merged = out ? mergeCheck({ blockId, pageId, recognition: this.withAiReadings(rec, out), local, ai: out, ms, via: out.cached ? 'cache' : 'ai' }) : { ...first, ms };
-      this.publish(pageId, block, merged, rec, true, key, results);
+      this.publish(pageId, block, merged, rec, true, key, out ? this.evaluate(pageId, block, rec, out) : results);
       this.lastMs = ms;
       this.resolve(blockId, merged);
     } catch (e) {

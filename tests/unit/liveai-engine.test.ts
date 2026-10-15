@@ -392,6 +392,33 @@ test('live results after a trailing "=", with variables from earlier lines', asy
   e.dispose();
 });
 
+test('live results only from confident readings: a misread never puts a wrong answer on the page', async () => {
+  recog.conf = 0.5;
+  try {
+    const { s, e } = setup('local', () => '');
+    s.add(write('12+5=', 0));
+    await settle();
+    assert.equal(e.decorations('p1').filter((d) => d.kind === 'result').length, 0, 'shaky reading: no result');
+    e.dispose();
+  } finally {
+    recog.conf = 0.95;
+  }
+  const { s, e } = setup('local', () => '');
+  s.add(write('12+5=', 0));
+  await settle();
+  assert.equal(e.decorations('p1').find((d) => d.kind === 'result')?.text, '17', 'confident reading: the result shows');
+  e.dispose();
+});
+
+test('Smart sends a shakily read "…=" to the better model to read it', () => {
+  const line = (confidence: number, text = '29+1=') => ({ blockId: 'b', ms: 0, lines: [{ lineId: 'l', kind: 'math' as const, text, latex: '', confidence, alternates: [], tokens: [], source: 'local-ink' as const }] });
+  const none = { lines: [{ lineId: 'l', verdict: 'none' as const }], issues: [] };
+  assert.equal(needsAi('smart', line(0.13), none), true);
+  assert.equal(needsAi('smart', line(0.98), none), false, 'sure of the reading: answered on this PC');
+  assert.equal(needsAi('local', line(0.13), none), false, 'Local never calls the cloud');
+  assert.equal(needsAi('smart', line(0.13, 'a=3'), none), false, 'a lone given is not escalated');
+});
+
 test('mistake journal: confirmed errors are kept per notebook, grouped, and become flashcards', async () => {
   const kv = memKV();
   const { s, e } = setup('local', () => '', { kv });
