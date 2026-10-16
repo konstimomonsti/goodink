@@ -1776,16 +1776,34 @@ function bestTemplate(eq: Eq, Ce: Eq[]): string {
   return best;
 }
 
-/** digits after the decimal point of a written number (or its negation); -1 when it is not a decimal */
-function decimalsOf(n: Node): number {
+/**
+ * The precision a written answer claims, and whether rounding to it is unambiguous:
+ * 2.33 → 0.01, 3.3·10^-4 → 10^-5, 1158 → 1. Small whole numbers (2 for 2.4) and trailing zeros
+ * (1200: exact, or rounded to 2 significant figures?) are ambiguous. null: not a plain number.
+ */
+function precisionOf(n: Node): { u: number; clear: boolean } | null {
   const t = n.t === 'neg' ? n.a! : n;
-  return t.t === 'num' && t.txt && /[.,]/.test(t.txt) ? t.txt.split(/[.,]/)[1].length : -1;
+  if (t.t === 'num' && t.txt) {
+    const [int, frac] = t.txt.split(/[.,]/);
+    if (frac !== undefined) return { u: Math.pow(10, -frac.length), clear: true };
+    const zeros = /0*$/.exec(int)![0].length;
+    if (zeros && zeros < int.length) return { u: Math.pow(10, zeros), clear: false };
+    return { u: 1, clear: Math.abs(Number(int)) >= 10 };
+  }
+  // scientific notation m·10^k
+  if (t.t === 'mul' && t.b?.t === 'pow' && t.b.a?.t === 'num' && t.b.a.txt === '10' && t.b.b) {
+    const m = precisionOf(t.a!);
+    const [k] = fval(t.b.b, {});
+    if (m && Number.isInteger(k)) return { u: m.u * Math.pow(10, k), clear: m.clear || m.u < 1 };
+  }
+  return null;
 }
 const TRIG_ALL = ['sin', 'cos', 'tan', 'cot', 'sec', 'csc'];
 /**
- * "3x=7" then "x=2.33", "A=π·9" then "A=28.27", "sin(x)=0.5" then "x=30": a solved value written as a
- * rounded decimal (or in degrees for a trig equation) is right when P has a root within one unit of
- * the last written digit. Returns OK, an 'unsure' when other roots are left out, or null.
+ * "3x=7" then "x=2.33", "A=π·25" then "A=79", "x=1/3000" then "x=3.3·10^-4", "sin(x)=0.5" then
+ * "x=30": a solved value written rounded is right when the exact solution rounds to exactly what
+ * is written, at the precision written. A value one rounding step off (truncated, 1.99 for 2) is
+ * 'unsure', never right; ambiguous roundings are 'unsure'. Returns OK, an 'unsure', or null.
  */
 function roundedAnswer(P: Eq[], C: Eq[]): Finding | null {
   if (!C.length || !C.every((e) => isSolvedEq(e))) return null;
@@ -1795,26 +1813,55 @@ function roundedAnswer(P: Eq[], C: Eq[]): Finding | null {
   const trig = P.some((e) => [e[0], e[1]].some((x) => { let f = false; walk(x, (m) => { if (m.t === 'fn' && TRIG_ALL.includes(m.name!) && hasVar(m.a!, v)) f = true; }); return f; }));
   const f = (x: number) => { let best = Infinity; for (const e of P) { const [l, s1] = fval(e[0], { [v]: x }), [r, s2] = fval(e[1], { [v]: x }); if (Number.isFinite(l) && Number.isFinite(r)) best = Math.min(best, Math.abs(l - r) / Math.max(s1, s2)); } return best; };
   const sgn = (x: number) => { for (const e of P) { const l = fval(e[0], { [v]: x })[0] - fval(e[1], { [v]: x })[0]; if (Number.isFinite(l)) return Math.sign(l); } return NaN; };
+  /** P has a root in [lo, hi] (exactly at an end counts) */
   const near = (lo: number, hi: number) => {
-    if (f(lo) <= 1e-9 || f(hi) <= 1e-9 || f((lo + hi) / 2) <= 1e-9) return true;
+    if (f(lo) <= 1e-12 || f(hi) <= 1e-12 || f((lo + hi) / 2) <= 1e-12) return true;
     const a = sgn(lo), b = sgn(hi);
     return Number.isFinite(a) && Number.isFinite(b) && a !== b && f((lo + hi) / 2) < 0.5;
   };
   const vals: number[] = [];
-  let anyRounded = false;
+  let doubt = '';
   for (const e of C) {
     const c = e[0].t === 'var' ? e[1] : e[0];
-    const k = decimalsOf(c);
     const [cv] = fval(c, {});
     if (!Number.isFinite(cv)) return null;
-    if (k < 0 && !trig) return null;
-    const d = k >= 0 ? Math.pow(10, -k) : 1e-9 * Math.max(1, Math.abs(cv));
+    const p = precisionOf(c);
+    if (!p && !trig) return null;
     const deg = Math.PI / 180;
-    if (near(cv - d, cv + d)) { anyRounded = anyRounded || k >= 0; vals.push(cv); continue; }
-    if (trig && near((cv - d) * deg, (cv + d) * deg)) { anyRounded = true; vals.push(cv * deg); continue; }
+    // a small whole number (x=3 for 3.33) is an answer, not a rounding
+    if (p && !p.clear && p.u === 1 && !trig) return null;
+    if (p && !(p.u === 1 && !p.clear)) {
+      // half a unit either side, widened by float noise only (never by a whole unit)
+      const half = p.u / 2 + 1e-9 * Math.max(1, Math.abs(cv));
+      // trig solutions repeat every turn: a whole-number angle of 7 or more is degrees (as in live
+      // results), and radian rounding only counts within one turn, or x=30 would "round" 30.37 rad
+      const radians = !trig || (Math.abs(cv) <= 2 * Math.PI + 0.5 && !(p.u === 1 && Math.abs(cv) >= 7));
+      if (radians && near(cv - half, cv + half)) {
+        if (!p.clear) doubt = 'Check the rounding';
+        vals.push(cv);
+        continue;
+      }
+      if (trig && near((cv - half) * deg, (cv + half) * deg)) {
+        vals.push(cv * deg);
+        continue;
+      }
+      // one rounding step off a decimal (truncated, or 1.99 for 2): not right, but not proven wrong
+      if (radians && p.u < 1 && near(cv - p.u - 1e-9 * Math.max(1, Math.abs(cv)), cv + p.u + 1e-9 * Math.max(1, Math.abs(cv)))) {
+        doubt = 'Check the rounding';
+        vals.push(cv);
+        continue;
+      }
+      return null;
+    }
+    // a whole-number angle for a trig equation: degrees
+    const d = 1e-9 * Math.max(1, Math.abs(cv));
+    if (trig && near((cv - d) * deg, (cv + d) * deg)) {
+      vals.push(cv * deg);
+      continue;
+    }
     return null;
   }
-  if (!anyRounded) return null;
+  if (doubt) return unsure(doubt);
   if (trig) return OK;
   const roots = P.flatMap((e) => rootsOf(e, v, {}));
   const missing = roots.some((r) => !vals.some((x) => Math.abs(x - r.x) <= 0.5 * Math.max(1e-6, Math.abs(r.x) * 1e-2, 0.1)));

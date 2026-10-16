@@ -480,6 +480,9 @@ describe('round 2', () => {
     assert.deepEqual(bad, []);
   });
 
+  /** round-2 classes fixed by the exact-rounding rule: hard assertions from now on */
+  const R2_FIXED = new Set(['R2-FP-1', 'R2-FP-2', 'R2-FP-3', 'R2-G-1', 'R2-G-2']);
+
   const CAUGHT2: string[] = [
     '3x=7 ;; x=2.32', '3x=7 ;; x=2.35', '3x=7 ;; x=-2.33', '3x=-7 ;; x=2.33', '3x=7 ;; x=2', '3x=7 ;; x=3', '3x=7 ;; x=2.5',
     '3x=7 ;; x=2.332', 'x^2=2 ;; x=1', 'x^2=2 ;; x=2', '2x=5 ;; x=3', '2x=5 ;; x=2', '100x=1 ;; x=0.0', 'x/7=1000 ;; x=7010',
@@ -516,7 +519,7 @@ describe('round 2', () => {
     ['R2-FP-5', "v=3t^2 ;; a=v'"], ['R2-FP-5', "v=3t^2 ;; a=v'=6t"], ['R2-FP-5', "y=2x+3 ;; m=y'=2"], ['R2-FP-5', "y=x^2 ;; k=y'"],
   ];
   for (const [id, b] of FP2) {
-    test(`${id} false red: ${b}`, { todo: `${id} (math-redteam.md round 2)` }, () => assert.deepEqual(reds(b), [], verdicts(b).join(',')));
+    test(`${id} false red: ${b}`, R2_FIXED.has(id) ? {} : { todo: `${id} (math-redteam.md round 2)` }, () => assert.deepEqual(reds(b), [], verdicts(b).join(',')));
   }
 
   // wrong work that the new rules tick green (worse than silence: it confirms the mistake)
@@ -534,7 +537,7 @@ describe('round 2', () => {
     ['R2-G-4', '2x+1=9 ;; 2x=8 /2 ;; x=2'], ['R2-G-4', 'x+3=7 :2 ;; x=4'],
   ];
   for (const [id, b] of GREEN2) {
-    test(`${id} green on wrong work: ${b}`, { todo: `${id} (math-redteam.md round 2)` }, () => assert.ok(!isGreen(b), verdicts(b).join(',')));
+    test(`${id} green on wrong work: ${b}`, R2_FIXED.has(id) ? {} : { todo: `${id} (math-redteam.md round 2)` }, () => assert.ok(!isGreen(b), verdicts(b).join(',')));
   }
 
   // recall lost to 'unsure' / 'none'
@@ -585,7 +588,7 @@ describe('round 2', () => {
     { name: 'p/q rounded to 2 dp', expect: 'noRed', gen: () => { const q = r2i(3, 13), p = r2i(2, 999); return `x=${p}/${q} ;; x=${(p / q).toFixed(2)}`; } },
     { name: 'p/q rounded to 3 dp', expect: 'noRed', gen: () => { const q = r2i(3, 13), p = r2i(2, 999); return `x=${p}/${q} ;; x=${(p / q).toFixed(3)}`; } },
     { name: 'sqrt n to 2 dp, both roots', expect: 'noRed', gen: () => { const n = r2i(2, 500); return `x^2=${n} ;; x=${Math.sqrt(n).toFixed(2)} or x=${(-Math.sqrt(n)).toFixed(2)}`; } },
-    { name: 'p/q rounded to a whole number', todo: 'R2-FP-1', expect: 'noRed', gen: () => { const q = r2i(3, 13), p = r2i(20, 999); return `x=${p}/${q} ;; x=${Math.round(p / q)}`; } },
+    { name: 'p/q rounded to a whole number (>= 10)', todo: 'R2-FP-1', expect: 'noRed', gen: () => { const q = r2i(3, 13), p = r2i(10 * q + 1, 999); return `x=${p}/${q} ;; x=${Math.round(p / q)}`; } },
     { name: 'p/q to 3 significant figures', todo: 'R2-FP-2', expect: 'noRed', gen: () => { const q = r2i(3, 13), p = r2i(1000, 99999); return `x=${p}/${q} ;; x=${Number((p / q).toPrecision(3))}`; } },
     { name: 'scientific notation, 2 s.f.', todo: 'R2-FP-3', expect: 'noRed', gen: () => { const q = r2i(3, 13), p = r2i(1, 9); const [m, e] = (p / q / 1000).toExponential(1).split('e'); return `x=${p}/${q * 1000} ;; x=${m}·10^${Number(e)}`; } },
     { name: 'exact decimal sum, answer off by 0.01', todo: 'R2-G-1', expect: 'notGreen', gen: () => { const a = r2i(1, 99), b = r2i(1, 99); return `x=${a / 10}+${b / 10} ;; x=${((a + b) / 10 + (R2() < 0.5 ? 0.01 : -0.01)).toFixed(2)}`; } },
@@ -593,7 +596,7 @@ describe('round 2', () => {
   ];
   for (const fam of FAM2) {
     const blocks = Array.from({ length: 150 }, fam.gen);
-    test(`family: ${fam.name} (150 blocks)`, fam.todo ? { todo: fam.todo } : {}, () => {
+    test(`family: ${fam.name} (150 blocks)`, fam.todo && !R2_FIXED.has(fam.todo) ? { todo: fam.todo } : {}, () => {
       const bad = blocks.filter((b) => (fam.expect === 'noRed' ? reds(b).length > 0 : isGreen(b)));
       assert.deepEqual(bad.slice(0, 5), [], `${bad.length}/150`);
     });
