@@ -2475,6 +2475,8 @@ export function evaluate(lines: LineRecognition[], vars?: ReadonlyMap<string, st
     try {
       if (/=$/.test(t) && !/[<>!≤≥]=$|==$/.test(t)) {
         const body = t.slice(0, -1);
+        // "50+20%=": 50.2 by the letter, 60 on a calculator. Ambiguous, so no result rather than a guess
+        if (/[+\-−]\s*[\d.,]+\s*%/.test(body)) continue;
         const p = prep(decideMode(parseOne(body, cd(body), false)));
         const st = p?.segs[p.segs.length - 1];
         const rel = st?.rels.length === 1 ? st.rels[0] : null;
