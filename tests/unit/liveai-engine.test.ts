@@ -194,6 +194,10 @@ function setup(mode: 'off' | 'local' | 'smart' | 'max', script: Script, o: { lat
 
 const kinds = (e: InstanceType<typeof LiveEngine>) => e.decorations('p1').map((d) => `${d.kind}`).sort();
 const settle = () => sleep(150);
+/** wait for a condition (up to 2 s): fixed sleeps flake when the whole suite runs in parallel */
+const until = async (ok: () => boolean, ms = 2000) => {
+  for (const t0 = Date.now(); !ok() && Date.now() - t0 < ms; ) await sleep(20);
+};
 
 test('Local mode makes zero AI calls, even when the CAS cannot decide', async () => {
   casKnows = false;
@@ -384,7 +388,7 @@ test('live results after a trailing "=", with variables from earlier lines', asy
   const { s, e } = setup('local', () => '');
   s.add(write('a=3', 0));
   s.add(write('2+a=', 3)); // a separate block below
-  await settle();
+  await until(() => e.decorations('p1').some((d) => d.kind === 'result'));
   const r = e.decorations('p1').find((d) => d.kind === 'result');
   assert.ok(r, 'a result mark');
   assert.equal(r.text, '5');
@@ -405,7 +409,7 @@ test('live results only from confident readings: a misread never puts a wrong an
   }
   const { s, e } = setup('local', () => '');
   s.add(write('12+5=', 0));
-  await settle();
+  await until(() => e.decorations('p1').some((d) => d.kind === 'result'));
   assert.equal(e.decorations('p1').find((d) => d.kind === 'result')?.text, '17', 'confident reading: the result shows');
   e.dispose();
 });

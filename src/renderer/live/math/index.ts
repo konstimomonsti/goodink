@@ -1730,6 +1730,8 @@ function internalChecks(s: Stmt, ctx: Ctx): Finding[] {
         if (!required) continue;
         if (vA !== vB) continue; // substitution "y = 2x+3 = 2·3+3", or an equation "f'(x) = 0"
         if (B.s < 0) continue;
+        // "a = v'", "m = y' = 2": a new name for a derivative is a definition, not an identity in a
+        if (k === 0 && A.t === 'var' && !A.name!.endsWith("'") && !A.fv && !hasVar(B, A.name!) && (B.fv || hasKind(B, 'deriv'))) continue;
         if ((hasKind(B, 'deriv') && !hasKind(A, 'deriv')) || (B.fv && !A.fv)) out.push(identityPair(B, A, ctx));
         else out.push(identityPair(A, B, ctx));
       }
@@ -2028,7 +2030,9 @@ function standaloneCheck(s: Stmt, ctx: Ctx, afterLine = false): Finding {
 }
 
 /** substitute user functions and derivative notation (f(2), f'(x), f''(1), y', y'') from earlier definitions */
-function resolveCalls(s: Stmt, defs: Ctx['defs']): Stmt | null {
+/** set by resolveCalls when it read a user function's angle in degrees */
+let resolvedInDegrees = false;
+function resolveCalls(s: Stmt, defs: Ctx['defs'], radians = false): Stmt | null {
   let bad = false;
   const nth = (name: string): { body: Node; param: string; primes: number } | null => {
     const primes = (name.match(/'+$/) ?? [''])[0].length;
@@ -2048,7 +2052,12 @@ function resolveCalls(s: Stmt, defs: Ctx['defs']): Stmt | null {
     const r = nth(m.name!);
     if (!r) { bad = true; return null; }
     const arg = mapNodes(m.a!, () => null);
-    return { ...mapNodes(r.body, (k) => (k.t === 'var' && k.name === r.param ? { ...arg, paren: '(' } : null)), s: m.s, e: m.e, paren: undefined, fv: r.primes ? 'd' : true };
+    // f(x) = sin(x) then f(30): the angle-mode rule applies inside the function too (degreeArg)
+    const deg = !radians && !varsOf(arg).size && degreeArg(arg, {});
+    if (deg) resolvedInDegrees = true;
+    const put = (k: Node) => (k.t === 'var' && k.name === r.param ? { ...arg, paren: '(' } : null);
+    const body = mapNodes(r.body, (k) => (deg && k.t === 'fn' && TRIG_ALL.includes(k.name!) && hasVar(k.a!, r.param) ? { ...k, a: nmul(mapNodes(k.a!, put), ndiv(N('const', { name: 'pi' }), num(rq(180)))) } : put(k)));
+    return { ...body, s: m.s, e: m.e, paren: undefined, fv: r.primes ? 'd' : true };
   }));
   return bad ? null : out;
 }
@@ -2115,10 +2124,19 @@ function judgeLine(prev: Stmt | null, cur: Parsed, defs: Ctx['defs']): LineOut {
   const fs: Finding[] = [];
   for (const seg0 of cur.segs) {
     if (definitionOf(seg0)) { fs.push(NONE); p = null; continue; }
+    resolvedInDegrees = false;
     const seg = resolveCalls(seg0, defs);
+    const inDegrees = resolvedInDegrees;
     const merged = seg && mergeLead(p, seg);
     if (!merged) { fs.push(NONE); p = null; continue; }
-    fs.push(judgeStmt(p, merged, ctx, cur.label && seg0 === cur.segs[0]));
+    let f = judgeStmt(p, merged, ctx, cur.label && seg0 === cur.segs[0]);
+    // degrees inside a user function is the primary reading; radians may turn a red into 'unsure'
+    if (f.verdict === 'error' && inDegrees) {
+      const rad = resolveCalls(seg0, defs, true);
+      const mr = rad && mergeLead(p, rad);
+      if (inDegrees && mr && judgeStmt(p, mr, ctx, cur.label && seg0 === cur.segs[0]).verdict !== 'error') f = unsure('Degrees or radians?', null);
+    }
+    fs.push(f);
     p = merged;
   }
   return { f: combine(fs), last: p };
