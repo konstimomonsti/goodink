@@ -325,6 +325,7 @@ export default function LiveLayer({ vp, s, slot, bridge, pageId }: { vp: Viewpor
             status={status}
             initial={card}
             question={cardQ}
+            onEdited={() => (gate.noFixUntil = performance.now() + 5000)}
             onClose={closeCard}
             onConvert={convert}
             onPractice={(i) => void practice(i)}

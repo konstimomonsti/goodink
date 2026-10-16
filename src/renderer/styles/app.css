@@ -1164,3 +1164,5 @@ html, body { touch-action: pan-x pan-y; }
 .live-voice-text { font: 400 13px/18px var(--font-sans); color: var(--c-text); overflow-wrap: anywhere; }
 .live-voice-text.is-hint { color: var(--c-text-muted); }
 @media (prefers-reduced-motion: reduce) { .live-voice-btn.is-on { animation: none; } }
+
+.live-edit-note { margin: 6px 2px 0; font: 400 12px/16px var(--font-sans); color: var(--live-amber-text, #8a5300); }

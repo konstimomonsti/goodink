@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Copy, CircleAlert, CircleHelp, CircleCheck, Pencil, ScanText, Sparkles, X, Lightbulb, Footprints, Wand2, WifiOff, CornerDownLeft, Shuffle, MessageCircleQuestion } from 'lucide-react';
 import type { Insight, Issue, LineRecognition } from '../contract';
 import type { JournalEntry, LiveStatus, LiveUiEngine, Turn } from './engineApi';
+import { plausibleEdit } from './editReading';
 import { LIVE_TUNING as T } from './tuning';
 import type { Viewport } from '../../engine/viewport';
 import { MathHtml, RichText } from '../../ui/Math';
@@ -23,10 +24,13 @@ const HINT_LABEL = { 1: 'Hint', 2: 'Next step', 3: 'Fix' } as const;
 const HINT_NEXT = { 1: 'Hint', 2: 'Next step', 3: 'Show fix' } as const;
 const HINT_ICON = { 1: <Lightbulb size={14} />, 2: <Footprints size={14} />, 3: <Wand2 size={14} /> } as const;
 
-export function InsightCard({ vp, engine, status, initial, question, onClose, onConvert, onPractice, onListening, onIssue }: { vp: Viewport; engine: LiveUiEngine; status: LiveStatus; initial: Insight; question?: string; onClose: () => void; onConvert: (ins: Insight) => void; onPractice?: (ins: Insight) => void; onListening?: (on: boolean, ins: Insight) => void; onIssue?: (e: JournalEntry) => void }) {
+export function InsightCard({ vp, engine, status, initial, question, onClose, onConvert, onPractice, onListening, onIssue, onEdited }: { vp: Viewport; engine: LiveUiEngine; status: LiveStatus; initial: Insight; question?: string; onEdited?: () => void; onClose: () => void; onConvert: (ins: Insight) => void; onPractice?: (ins: Insight) => void; onListening?: (on: boolean, ins: Insight) => void; onIssue?: (e: JournalEntry) => void }) {
   const [ins, setIns] = useState(initial);
   const [editing, setEditing] = useState<{ lineId: string; text: string } | null>(null);
   const [rechecking, setRechecking] = useState(false);
+  // a rejected edit (not what is on the page), and whether the verdict now rests on the learner's correction
+  const [editNote, setEditNote] = useState('');
+  const [edited, setEdited] = useState(false);
   const [hints, setHints] = useState<HintStep[]>([]);
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [follow, setFollow] = useState<string[]>([]);
@@ -94,7 +98,8 @@ export function InsightCard({ vp, engine, status, initial, question, onClose, on
   const issues = check?.issues ?? [];
   const focusId = ins.focusLineId ?? issues[0]?.lineId ?? recs[0]?.lineId ?? null;
   const issue: Issue | null = issues.find((i) => i.lineId === focusId) ?? issues.find((i) => i.severity === 'error') ?? issues[0] ?? null;
-  const verdict = rechecking || !check ? 'pending' : issue?.severity === 'error' ? 'error' : issue?.severity === 'unsure' ? 'unsure' : check.lines.some((l) => l.verdict === 'ok') ? 'ok' : 'none';
+  const verdict0 = rechecking || !check ? 'pending' : issue?.severity === 'error' ? 'error' : issue?.severity === 'unsure' ? 'unsure' : check.lines.some((l) => l.verdict === 'ok') ? 'ok' : 'none';
+  const verdict = edited && verdict0 === 'ok' ? 'unsure' : verdict0;
   const lowRead = recs.find((r) => r.lineId === focusId)?.confidence ?? 1;
   const busy = msgs.some((m) => m.streaming) || hints.some((h) => h.streaming);
   const carried = !!check?.lines.some((l) => l.carried);
@@ -121,8 +126,21 @@ export function InsightCard({ vp, engine, status, initial, question, onClose, on
   const saveReading = async () => {
     if (!editing) return;
     const text = editing.text.trim();
+    const rec = recs.find((r) => r.lineId === editing.lineId);
+    if (!text || text === rec?.text) {
+      setEditing(null);
+      setEditNote('');
+      return;
+    }
+    // only a misread may be corrected here; changing what is written needs ink
+    if (rec && !plausibleEdit(rec.text, rec.alternates, text)) {
+      setEditNote("That's not what's on the page. Rewrite it in ink to fix it.");
+      return;
+    }
     setEditing(null);
-    if (!text || text === recs.find((r) => r.lineId === editing.lineId)?.text) return;
+    setEditNote('');
+    setEdited(true);
+    onEdited?.();
     setRechecking(true);
     setHints([]);
     try {
@@ -213,7 +231,7 @@ export function InsightCard({ vp, engine, status, initial, question, onClose, on
       <header className="live-card-head">
         <VerdictChip verdict={verdict} />
         <span className="live-src" title={check ? `Checked in ${check.ms} ms` : undefined}>
-          {check && !rechecking ? sourceLabel(check.via, issue) : ''}
+          {check && !rechecking ? (edited ? 'Checked against your correction' : sourceLabel(check.via, issue)) : ''}
         </span>
         <IconButton label="Close (Esc)" className="live-x" onClick={onClose}>
           <X size={16} />
@@ -246,6 +264,11 @@ export function InsightCard({ vp, engine, status, initial, question, onClose, on
                 <ReadingLine key={r.lineId} r={r} issue={issues.find((i) => i.lineId === r.lineId) ?? null} focus={r.lineId === focusId} editing={editing?.lineId === r.lineId ? editing.text : null} onEdit={(text) => setEditing({ lineId: r.lineId, text })} onSave={() => void saveReading()} onCancel={() => setEditing(null)} />
               ))}
             </ol>
+          )}
+          {editNote && (
+            <p className="live-edit-note" role="alert">
+              {editNote}
+            </p>
           )}
         </section>
 
