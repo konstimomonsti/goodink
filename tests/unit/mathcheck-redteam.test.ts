@@ -481,7 +481,7 @@ describe('round 2', () => {
   });
 
   /** round-2 classes fixed by the exact-rounding rule: hard assertions from now on */
-  const R2_FIXED = new Set(['R2-FP-1', 'R2-FP-2', 'R2-FP-3', 'R2-G-1', 'R2-G-2']);
+  const R2_FIXED = new Set(['R2-FP-1', 'R2-FP-2', 'R2-FP-3', 'R2-G-1', 'R2-G-2', 'R2-G-3', 'R2-G-4', 'R2-L-1', 'R2-L-2', 'R2-L-3', 'R2-L-5']);
 
   const CAUGHT2: string[] = [
     '3x=7 ;; x=2.32', '3x=7 ;; x=2.35', '3x=7 ;; x=-2.33', '3x=-7 ;; x=2.33', '3x=7 ;; x=2', '3x=7 ;; x=3', '3x=7 ;; x=2.5',
@@ -577,7 +577,7 @@ describe('round 2', () => {
     ['R2-L-6', '50+20%=', (v) => v[0] !== '50.2'], // checkSteps lets 50+20%=60 through as unsure, the live value is 50.2
   ];
   for (const [id, b, ok] of LIVE2_BAD) {
-    test(`${id} live: ${b}`, { todo: `${id} (math-redteam.md round 2)` }, () => assert.ok(ok(ev(b)), ev(b).join(',')));
+    test(`${id} live: ${b}`, R2_FIXED.has(id) ? {} : { todo: `${id} (math-redteam.md round 2)` }, () => assert.ok(ok(ev(b)), ev(b).join(',')));
   }
 
   // generated families (seeded)

@@ -114,7 +114,7 @@ export interface Node {
 type RelOp = '=' | '<' | '>' | '<=' | '>=' | '!=' | '~';
 interface Rel { parts: Node[]; ops: RelOp[]; opSpans: [number, number][] }
 interface Stmt { rels: Rel[]; lead: RelOp | null }
-interface Parsed { text: string; segs: Stmt[]; label: boolean; note?: 'pct' | 'sup' } // note: a reading that may only yield 'unsure'
+interface Parsed { text: string; segs: Stmt[]; label: boolean; note?: 'pct' | 'sup' | 'ann' | 'mode' } // note: a reading that may only yield 'unsure'
 
 const N = (t: Kind, o: Partial<Node> = {}): Node => ({ t, s: -1, e: -1, ...o });
 const num = (q: Rat) => N('num', { q });
@@ -581,6 +581,20 @@ const anyNode = (p: Parsed, pred: (n: Node) => boolean) => {
   return f;
 };
 
+const TRIG_ALL = ['sin', 'cos', 'tan', 'cot', 'sec', 'csc'];
+/**
+ * Is this trig argument an angle in degrees? One rule for checking and live results: it has no π
+ * and its value is 7 or more in size ("sin(30)", "sin(15+15)", "sin(x)" with x = 30). Below that,
+ * radians ("sin(1)", "sin(π/6)").
+ */
+function degreeArg(a: Node, env: Env): boolean {
+  let pi = false;
+  walk(a, (m) => { if (m.t === 'const' && m.name === 'pi') pi = true; });
+  if (pi) return false;
+  const [x] = fval(a, env);
+  return Number.isFinite(x) && Math.abs(x) >= 7;
+}
+
 /** all plausible parses of a line, primary first (decimal comma, 1/2x, log base, degree mode) */
 export function parseVariants(text: string): Parsed[] {
   const out: Parsed[] = [];
@@ -593,7 +607,8 @@ export function parseVariants(text: string): Parsed[] {
   }
   if (BARLESS.test(text.replace(/[|✓✔\s]+$/, ''))) {
     const p = parseOne(text, commaOpts[0], false, true);
-    if (p && (!out.length || p.segs.length === out[0].segs.length)) out.push(p);
+    // reading the end of the line as a working note may rescue a false red, never make a line right
+    if (p && (!out.length || p.segs.length === out[0].segs.length)) out.push(out.length ? { ...p, note: 'ann' } : p);
   }
   const more: Parsed[] = [];
   for (const p of out) {
@@ -606,13 +621,15 @@ export function parseVariants(text: string): Parsed[] {
   const res: Parsed[] = [];
   const remap = (p: Parsed, f: (m: Node) => Node | null, note?: Parsed['note']): Parsed => ({ ...p, note, segs: p.segs.map((s) => mapStmt(s, (x) => mapNodes(x, f))) });
   for (const p of more) {
-    res.push(p);
-    // degree mode: numeric trig arguments in degrees, inverse trig results in degrees
-    const trig = (m: Node) => m.t === 'fn' && ['sin', 'cos', 'tan', 'cot', 'sec', 'csc'].includes(m.name!) && !varsOf(m.a!).size;
+    // angle mode, decided once per line (shared with evaluate): degrees when a numeric angle is a
+    // degree-sized number (see degreeArg); the other mode is kept only as an 'unsure'-only reading
+    const trig = (m: Node) => m.t === 'fn' && TRIG_ALL.includes(m.name!) && !varsOf(m.a!).size;
     const itrig = (m: Node) => m.t === 'fn' && ['asin', 'acos', 'atan'].includes(m.name!) && !varsOf(m.a!).size;
     if (anyNode(p, (m) => trig(m) || itrig(m))) {
-      res.push(remap(p, (m) => (trig(m) ? { ...m, a: nmul(m.a!, ndiv(N('const', { name: 'pi' }), num(rq(180)))) } : itrig(m) ? nmul({ ...m }, ndiv(num(rq(180)), N('const', { name: 'pi' }))) : null)));
-    }
+      const deg = remap(p, (m) => (trig(m) ? { ...m, a: nmul(m.a!, ndiv(N('const', { name: 'pi' }), num(rq(180)))) } : itrig(m) ? nmul({ ...m }, ndiv(num(rq(180)), N('const', { name: 'pi' }))) : null));
+      if (anyNode(p, (m) => trig(m) && degreeArg(m.a!, {}))) res.push(deg, { ...p, note: 'mode' });
+      else res.push(p, { ...deg, note: 'mode' });
+    } else res.push(p);
   }
   const base = res[0];
   if (base) {
@@ -1798,7 +1815,6 @@ function precisionOf(n: Node): { u: number; clear: boolean } | null {
   }
   return null;
 }
-const TRIG_ALL = ['sin', 'cos', 'tan', 'cot', 'sec', 'csc'];
 /**
  * "3x=7" then "x=2.33", "A=π·25" then "A=79", "x=1/3000" then "x=3.3·10^-4", "sin(x)=0.5" then
  * "x=30": a solved value written rounded is right when the exact solution rounds to exactly what
@@ -2137,7 +2153,7 @@ function readingsOf(line: LineRecognition, primary: Parsed[]): Reading[] {
 }
 const lastSeg = (p: Parsed): Stmt | null => { const s = p.segs[p.segs.length - 1]; return s.lead ? null : s; };
 
-interface Hist { last: Stmt | null; lasts: (Stmt | null)[]; verdict: Verdict; rec: LineRecognition; readings: Reading[] }
+interface Hist { last: Stmt | null; lasts: (Stmt | null)[]; verdict: Verdict; rec: LineRecognition; readings: Reading[]; noted: boolean[]; shaky: boolean }
 
 const MISCONCEPTION: Record<string, string> = {
   'Sign error': 'sign-move', 'Distributed to one term': 'distribute-first-term', 'Squared term by term': 'square-of-sum',
@@ -2176,6 +2192,7 @@ export function checkSteps(lines: LineRecognition[]): { lines: LineCheck[]; issu
     const readings = readingsOf(line, variants);
     // "x^2-5x+6=0", "x=2", "x=4": a second final answer is checked against the equation it answers
     let corrected = false;
+    let rescuedByNote = false;
     if (f.verdict === 'none' && anchor && prev?.last && isFinalAnswer(prev.last) && res.last && isFinalAnswer(res.last) && !answerValues(res.last).every((v) => listed.has(v))) {
       const r = judgeLineSafe(anchor, variants[0], defs).f;
       // candidates of a root / log / |…| equation may be extraneous: never red there
@@ -2186,14 +2203,18 @@ export function checkSteps(lines: LineRecognition[]): { lines: LineCheck[]; issu
     if (f.verdict === 'error') {
       // parse ambiguity (decimal comma, 1/2x, log base, degrees): any sound parse wins
       let best: Finding | null = null;
-      for (const pl of prevLasts) for (const v of variants) {
+      let bestNoted = false;
+      for (const [pi, pl] of prevLasts.entries()) for (const v of variants) {
         if (pl === prevLasts[0] && v === variants[0]) continue;
         const r = judgeLineSafe(pl, v, defs);
         let rf = r.f;
-        if (v.note && rf.verdict !== 'error') rf = unsure(v.note === 'pct' ? 'Percent notation' : 'Check the reading', null);
-        if (rf.verdict !== 'error' && (!best || rankV[rf.verdict] < rankV[best.verdict] || (best.verdict === 'none' && rf.verdict === 'ok'))) best = rf;
+        // a reading that only works as a working note (on this line or the one before) is never 'ok'
+        const noted = v.note ?? (prev?.noted[pi] ? 'ann' : undefined);
+        if (noted && rf.verdict !== 'error') rf = unsure(noted === 'pct' ? 'Percent notation' : 'Check the reading', null);
+        if (rf.verdict !== 'error' && (!best || rankV[rf.verdict] < rankV[best.verdict] || (best.verdict === 'none' && rf.verdict === 'ok'))) { best = rf; bestNoted = !!noted; }
       }
       if (best) f = best.verdict === 'none' && prevLasts[0] ? { ...f, verdict: 'unsure' } : best;
+      rescuedByNote = !!best && bestNoted;
     }
     if (f.verdict === 'error') {
       // misread? every plausible reading of the previous line x every plausible reading of this one
@@ -2225,7 +2246,9 @@ export function checkSteps(lines: LineRecognition[]): { lines: LineCheck[]; issu
     if (res.last && !isFinalAnswer(res.last) && effOf(res.last).k === 'eq') { anchor = res.last; listed = new Set(); }
     else if (!res.last) anchor = null;
     if (res.last && isFinalAnswer(res.last)) for (const v of answerValues(res.last)) listed.add(v);
-    const h: Hist = { last: res.last, lasts, verdict: f.verdict, rec: line, readings };
+    // after a line read only through a working note, the next line cannot be confirmed either
+    if (f.verdict === 'ok' && prev?.shaky) f = unsure('Check the reading', null);
+    const h: Hist = { last: res.last, lasts, verdict: f.verdict, rec: line, readings, noted: variants.map((v) => v.note === 'ann'), shaky: rescuedByNote && f.verdict === 'unsure' };
     hist.push(h);
     prev = h;
     const check: LineCheck = { lineId: line.lineId, verdict: f.verdict };
@@ -2381,6 +2404,7 @@ function formatValue(q: Rat | null, x: number): { value: string; latex: string }
     if (q.d <= 1000n && babs(q.n) < 1000000n) return { value: `${q.n}/${q.d}`, latex: texRat(q) };
   }
   if (!Number.isFinite(x)) return null;
+  if (Math.abs(x) < 1e-12) return { value: '0', latex: '0' };
   if (x !== 0 && (Math.abs(x) >= 1e10 || Math.abs(x) < 1e-6)) {
     const [m, e] = x.toExponential(6).split('e');
     const mm = String(Number(m));
@@ -2412,14 +2436,20 @@ export function evaluate(lines: LineRecognition[], vars?: ReadonlyMap<string, st
     ...p,
     segs: p.segs.map((st) => mapStmt(st, (x) => mapNodes(x, (m) => {
       if (m.t === 'const' && rebound.has(m.name!)) return { ...m, t: 'var' };
-      // one rule shared with checkSteps' degree reading: a whole-number trig argument of 7 or more is degrees
-      if (m.t === 'fn' && TRIG_ALL.includes(m.name!)) {
-        const a = m.a!;
-        const lit = a.t === 'num' ? a : a.t === 'neg' && a.a!.t === 'num' ? a.a! : null;
-        if (lit && lit.q!.d === 1n && babs(lit.q!.n) >= 7n) return { ...m, a: nmul({ ...a }, ndiv(N('const', { name: 'pi' }), num(rq(180)))) };
+      // one rule shared with checkSteps (degreeArg), using the values of earlier variables, and one
+      // mode for the whole line: sin(7)+sin(6) is two angles in degrees, not one of each
+      if (m.t === 'fn' && TRIG_ALL.includes(m.name!) && degLine) {
+        let pi = false;
+        walk(m.a!, (k) => { if (k.t === 'const' && k.name === 'pi') pi = true; });
+        if (!pi) return { ...m, a: nmul({ ...m.a! }, ndiv(N('const', { name: 'pi' }), num(rq(180)))) };
       }
       return null;
     }))),
+  };
+  let degLine = false;
+  const decideMode = (p: Parsed | null) => {
+    degLine = !!p && anyNode(p, (m) => m.t === 'fn' && TRIG_ALL.includes(m.name!) && [...varsOf(m.a!)].every((v) => v in f) && degreeArg(m.a!, f));
+    return p;
   };
   for (const line of lines) {
     if (line.kind !== 'math') continue;
@@ -2427,7 +2457,7 @@ export function evaluate(lines: LineRecognition[], vars?: ReadonlyMap<string, st
     try {
       if (/=$/.test(t) && !/[<>!≤≥]=$|==$/.test(t)) {
         const body = t.slice(0, -1);
-        const p = prep(parseOne(body, cd(body), false));
+        const p = prep(decideMode(parseOne(body, cd(body), false)));
         const st = p?.segs[p.segs.length - 1];
         const rel = st?.rels.length === 1 ? st.rels[0] : null;
         if (!rel) continue;
@@ -2440,7 +2470,7 @@ export function evaluate(lines: LineRecognition[], vars?: ReadonlyMap<string, st
         continue;
       }
       // assignments: "a = 3", "b = 2a+1", "e = 5"
-      const p = prep(parseOne(t, cd(t), false));
+      const p = prep(decideMode(parseOne(t, cd(t), false)));
       const r = p?.segs.length === 1 && p.segs[0].rels.length === 1 ? p.segs[0].rels[0] : null;
       if (r && r.ops.length === 1 && r.ops[0] === '=' && r.parts[0].t === 'const' && known(r.parts[1])) { rebound.add(r.parts[0].name!); assign(r.parts[0].name!, r.parts[1]); continue; }
       if (r && r.ops.length === 1 && r.ops[0] === '=' && r.parts[0].t === 'var' && !hasVar(r.parts[1], r.parts[0].name!) && known(r.parts[1])) assign(r.parts[0].name!, r.parts[1]);
