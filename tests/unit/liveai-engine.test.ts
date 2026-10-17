@@ -225,9 +225,10 @@ test('nothing runs before the block settles; a proven error is red under the wro
   assert.equal(e.decorations('p1').length, 0);
   assert.ok(e.stats().pending > 0);
   await settle();
-  // the CAS proved line 2 wrong on a confident reading: red, no AI needed
+  // every formula also goes to the cloud (owner, 2026-10-17); this mock cloud wrongly calls line 2
+  // fine, but the CAS proved it wrong on a confident reading: the red stands
   assert.deepEqual(kinds(e), ['error', 'ok']);
-  assert.equal(p.calls.length, 0);
+  assert.ok(p.judges().length > 0, 'the cloud checked the formulas');
   const err = e.decorations('p1').find((d) => d.kind === 'error')!;
   // the underline runs under "=10" only (strokes 3..5 of line 2), just below them
   assert.equal(err.underline.x1, 20 + 2 * 12);
@@ -257,16 +258,15 @@ test('red waits 900 ms after pen-up and is held while the pen is busy at that li
   e.dispose();
 });
 
-test('Smart: undecided lines are judged one by one, cached; red only after the blind re-solve agrees', async () => {
+test('Smart: every formula is judged in the cloud, cached; red only after the blind re-solve agrees', async () => {
   casKnows = false;
   let agree = false;
   const { s, e, p } = setup('smart', standard(() => agree));
   s.add(write('2x+3=7', 0));
   s.add(write('2x=10', 1));
   await settle();
-  // one judge call per undecided step (the first line is a given, never judged); the parallel
-  // re-solve disagreed on line 2: never red
-  assert.equal(p.judges().length, 1);
+  // one judge call per formula, the first line included; the parallel re-solve disagreed on line 2: never red
+  assert.equal(p.judges().length, 2);
   assert.ok(p.judges().every((c) => /Recogniser reading of the new step/.test(c.user)));
   assert.ok(!kinds(e).includes('error'));
   const st = e.stats();
@@ -297,16 +297,19 @@ test('Smart: undecided lines are judged one by one, cached; red only after the b
   casKnows = true;
 });
 
-test('Smart skips lines the CAS decided; Max judges them too', async () => {
+test('Smart sends every formula to the cloud, even ones the CAS decided; Local sends nothing', async () => {
   const { s, e, p } = setup('smart', standard(() => true));
   s.add(write('1+1=2', 0));
   s.add(write('1+1=2', 1));
   await settle();
-  assert.equal(p.calls.length, 0);
-  e.setMode('max');
-  await settle();
-  assert.equal(p.judges().length, 1);
+  assert.equal(p.judges().length, 2);
   e.dispose();
+  const t = setup('local', standard(() => true));
+  t.s.add(write('1+1=2', 0));
+  t.s.add(write('1+1=2', 1));
+  await settle();
+  assert.equal(t.p.calls.length, 0);
+  t.e.dispose();
 });
 
 test('first error only; a carried line gets no mark', async () => {
@@ -414,13 +417,13 @@ test('live results only from confident readings: a misread never puts a wrong an
   e.dispose();
 });
 
-test('Smart sends a shakily read "…=" to the better model to read it', () => {
+test('Smart sends every formula to the better model, but not plain givens', () => {
   const line = (confidence: number, text = '29+1=') => ({ blockId: 'b', ms: 0, lines: [{ lineId: 'l', kind: 'math' as const, text, latex: '', confidence, alternates: [], tokens: [], source: 'local-ink' as const }] });
   const none = { lines: [{ lineId: 'l', verdict: 'none' as const }], issues: [] };
   assert.equal(needsAi('smart', line(0.13), none), true);
-  assert.equal(needsAi('smart', line(0.98), none), false, 'sure of the reading: answered on this PC');
+  assert.equal(needsAi('smart', line(0.98), none), true, 'sure of the reading: still checked in the cloud');
   assert.equal(needsAi('local', line(0.13), none), false, 'Local never calls the cloud');
-  assert.equal(needsAi('smart', line(0.13, 'a=3'), none), false, 'a lone given is not escalated');
+  assert.equal(needsAi('smart', line(0.98, 'a=3'), none), false, 'a plain given has nothing to check');
 });
 
 test('mistake journal: confirmed errors are kept per notebook, grouped, and become flashcards', async () => {
@@ -489,23 +492,23 @@ test('deictic: "why?" refers to the block under the pen, else the one written in
 
 test('mode gating and geometry helpers', () => {
   // a premise line first: the first line of a block is a given and never judged
-  const line0 = { lineId: 'p', kind: 'math' as const, text: 'p', latex: '', confidence: 1, alternates: [], tokens: [], source: 'local-ink' as const };
+  const line0 = { lineId: 'p', kind: 'math' as const, text: 'a=1', latex: '', confidence: 1, alternates: [], tokens: [], source: 'local-ink' as const };
   const rec = (kind: 'math' | 'text', confidence = 0.95) => ({ blockId: 'b', ms: 0, lines: [line0, { lineId: 'l', kind, text: 't', latex: '', confidence, alternates: [], tokens: [], source: 'local-ink' as const }] });
   const loc = (v: 'ok' | 'error' | 'unsure' | 'none', carried = false) => ({ lines: [{ lineId: 'l', verdict: v, carried }], issues: v === 'error' ? [{ lineId: 'l', span: null, severity: 'error' as const, title: '', detail: '', source: 'local-cas' as const, confidence: 0.99 }] : [] });
   assert.equal(needsAi('local', rec('math'), loc('unsure')), false);
   assert.equal(needsAi('off', rec('math'), loc('unsure')), false);
   assert.equal(needsAi('smart', rec('math'), loc('unsure')), true);
-  assert.equal(needsAi('smart', rec('math'), loc('ok')), false, 'a confidently read, correct step stays on this PC');
-  assert.equal(needsAi('smart', rec('math', 0.6), loc('ok')), true, 'not sure of the reading: the cloud reads and judges it');
+  assert.equal(needsAi('smart', rec('math'), loc('ok')), true, 'every formula is checked in the cloud');
+  assert.equal(needsAi('smart', rec('math', 0.6), loc('ok')), true);
   assert.equal(needsAi('local', rec('math', 0.6), loc('ok')), false, 'Local never calls the cloud');
   assert.equal(needsAi('smart', rec('text'), loc('none')), false);
   assert.equal(needsAi('smart', rec('math', 0.5), loc('error')), true);
-  assert.equal(needsAi('smart', rec('math', 0.95), loc('error')), false);
+  assert.equal(needsAi('smart', rec('math', 0.95), loc('error')), true, 'a proven error still gets the cloud explanation');
   assert.equal(needsAi('smart', rec('math'), loc('unsure', true)), false, 'carried lines are not judged');
   assert.equal(needsAi('max', rec('text'), loc('none')), true);
-  assert.equal(linesToJudge('max', rec('math', 0.95), loc('error')).length, 0, 'a proven error is final even in Max');
-  const lone = { blockId: 'b', ms: 0, lines: [{ ...line0, lineId: 'l' }] };
-  assert.equal(needsAi('smart', lone, loc('unsure')), false, 'a lone line is a given, not a step');
+  assert.equal(linesToJudge('max', rec('math', 0.95), loc('error')).length, 1, 'a proven error is sent once for its explanation, nothing after it');
+  const lone = { blockId: 'b', ms: 0, lines: [{ ...line0, lineId: 'l', text: 'x^2-4=(x-2)(x+2)' }] };
+  assert.equal(needsAi('smart', lone, loc('unsure')), true, 'a one-line formula is checked too');
   const line = { id: 'l', pageId: 'p', strokeIds: [], bbox: [0, 0, 100, 20] as BBox };
   const g = markGeometry(line, undefined, null);
   assert.deepEqual([g.underline.x1, g.underline.x2], [0, 100]);

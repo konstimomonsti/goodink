@@ -140,28 +140,28 @@ export function linesToJudge(mode: LiveMode, rec: BlockRecognition, local: Local
   if (mode !== 'smart' && mode !== 'max') return [];
   const provedLocally = (l: LineRecognition, i: number) =>
     i > 0 && l.confidence >= POLICY.confidentReading && local.lines.find((x) => x.lineId === l.lineId)?.verdict === 'error' && local.issues.some((x) => x.lineId === l.lineId && x.severity === 'error' && x.confidence >= POLICY.confidentCas);
-  // the CAS proved a step wrong and it passes the red gate: the block is decided on this PC, and
-  // Smart sends nothing at all (nothing after a first error is marked anyway)
-  if (mode === 'smart' && rec.lines.some(provedLocally)) return [];
   const out: LineRecognition[] = [];
   for (const [i, l] of rec.lines.entries()) {
     const lc = local.lines.find((x) => x.lineId === l.lineId);
-    const v = lc?.verdict ?? 'none';
-    if (provedLocally(l, i)) break;
-    // the first line has no premise: a definition or a given, never judged as a step. Except in
-    // Smart, a shakily read "…=" asking for a live result: the better model reads it
-    if (i === 0) {
-      if (mode === 'smart' && l.kind === 'math' && /=\s*$/.test(l.text) && l.confidence < POLICY.confidentReading) out.push(l);
-      continue;
-    }
     if (lc?.carried) continue;
     if (mode === 'max') {
-      if (l.text || l.tokens.length) out.push(l);
+      // the first line has no premise; Max still reads and judges every later line, prose too
+      if (i > 0 && (l.text || l.tokens.length)) out.push(l);
+      if (provedLocally(l, i)) break;
       continue;
     }
+    // Smart (owner, 2026-10-17): the cloud model checks every formula. The CAS verdict is the
+    // instant first pass and the veto against false reds; a plain given ("a = 3") has nothing to check
     if (l.kind !== 'math') continue;
-    const shaky = l.confidence < POLICY.confidentReading;
-    if (!POLICY.smartOnlyUndecided || v === 'unsure' || v === 'none' || v === 'pending' || (v === 'error' && shaky) || (v === 'ok' && shaky && POLICY.smartEscalateShakyReading)) out.push(l);
+    if (POLICY.cloudChecksEveryFormula) {
+      if (!/^\s*[A-Za-z]\s*=\s*[-+]?[\d.,]+\s*$/.test(l.text)) out.push(l);
+    } else {
+      const v = lc?.verdict ?? 'none';
+      const shaky = l.confidence < POLICY.confidentReading;
+      if (i === 0 ? /=\s*$/.test(l.text) && shaky : v === 'unsure' || v === 'none' || v === 'pending' || shaky) out.push(l);
+    }
+    // only the first error is marked: nothing after a proven one needs the cloud
+    if (provedLocally(l, i)) break;
   }
   return out;
 }

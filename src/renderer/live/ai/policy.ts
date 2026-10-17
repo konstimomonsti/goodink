@@ -55,6 +55,9 @@ export const POLICY = {
   smartEscalateShakyReading: true,
   /** the model Smart escalates to: the better, slower one (the owner asked for the better model) */
   smartTier: 'strong' as Tier,
+  /** Smart sends every formula line to the cloud model, not only the ones this PC is unsure of
+   *  (owner, 2026-10-17). The CAS stays the instant first pass and the veto against false reds. */
+  cloudChecksEveryFormula: true,
   /** ink older than this session is judged by AI only when the learner opens its card */
   aiOnlyForFreshInk: true,
   /** only the first error of a block is marked red; later ones are in the card */
