@@ -59,17 +59,22 @@ export interface LiveBlockCheck extends BlockCheck {
 
 const demote = (i: Issue): Issue => ({ ...i, severity: 'unsure', confidence: Math.min(i.confidence, 0.6) });
 
+const squash = (t: string) => t.replace(/\s+/g, '');
+
 export function mergeCheck(a: { blockId: string; pageId: string; recognition: BlockRecognition; local: LocalResult; ai: AiOutcome | null; ms: number; via: BlockCheck['via'] }): LiveBlockCheck {
   const lines: LineCheck[] = [];
   const issues: Issue[] = [];
   for (const rec of a.recognition.lines) {
     const id = rec.lineId;
     const localLine = a.local.lines.find((l) => l.lineId === id);
-    const L: Verdict = localLine?.verdict ?? 'none';
-    const localIssues = a.local.issues.filter((i) => i.lineId === id);
+    const A = a.ai?.lines.find((l) => l.lineId === id);
+    // the cloud read this line differently (an integral, a fraction the recogniser mangled): the
+    // local verdict is about another formula and counts for nothing, either way
+    const misread = !!A?.corrected && squash(A.corrected) !== squash(rec.text) && squash(A.corrected) !== squash(rec.latex);
+    const L: Verdict = misread ? 'none' : localLine?.verdict ?? 'none';
+    const localIssues = misread ? [] : a.local.issues.filter((i) => i.lineId === id);
     const casError = localIssues.find((i) => i.severity === 'error');
     const confident = rec.confidence >= CONFIDENT_READING;
-    const A = a.ai?.lines.find((l) => l.lineId === id);
     let verdict: Verdict;
     const out: Issue[] = [];
 

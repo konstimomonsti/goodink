@@ -156,6 +156,18 @@ test('CAS error on a confident reading is red and final, whatever the AI says', 
   assert.equal(c.issues[0].source, 'local-cas');
 });
 
+test('a line the cloud read differently: the local verdict about the misread formula counts for nothing', () => {
+  // an integral the recogniser mangled into "Sx2dx=x3/3" with high (wrong) confidence
+  const r = rec([{ id: 'a', text: 'Sx2dx=x3/3', conf: 0.95 }]);
+  const corrected = (verdict: 'ok' | 'error', confirmed = false) => ai([{ ...aiLine('a', verdict, confirmed), corrected: '\\int x^2\\,dx = \\frac{x^3}{3} + C' }]);
+  // local "proof" of an error on the misreading, cloud reads it right and finds it correct: not red
+  assert.deepEqual(verdicts(merge(r, { lines: [{ lineId: 'a', verdict: 'error' }], issues: [casIssue('a')] }, corrected('ok'))), ['ok']);
+  // local "correct" on the misreading cannot hide a confirmed cloud error
+  assert.deepEqual(verdicts(merge(r, { lines: [{ lineId: 'a', verdict: 'ok' }], issues: [] }, corrected('error', true))), ['error']);
+  // and a cloud error on its own reading still needs the independent re-solve
+  assert.deepEqual(verdicts(merge(r, { lines: [{ lineId: 'a', verdict: 'ok' }], issues: [] }, corrected('error'))), ['unsure']);
+});
+
 test('CAS error on a shaky reading is only amber without AI', () => {
   const c = merge(rec([{ id: 'a', text: '2x=10', conf: 0.6 }]), { lines: [{ lineId: 'a', verdict: 'error' }], issues: [casIssue('a')] }, null);
   assert.deepEqual(verdicts(c), ['unsure']);
