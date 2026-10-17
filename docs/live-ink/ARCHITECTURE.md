@@ -137,3 +137,27 @@ These override earlier sections where they differ.
 
    Nothing pops up, speaks or listens unprompted, and there is no open microphone. Marks (red,
    amber, ticks, live results) are part of following the notes, not the tutor, and stay automatic.
+
+## F. Owner priorities (2026-10-17): the cloud model checks the formulas; complex maths first
+
+These override §A.1–A.3 and §E.2 where they differ.
+
+1. **The main use is complex mathematics:** integrals, derivatives, limits, series, matrices and
+   the like, not only school arithmetic.
+2. **Every formula is checked by the cloud model** (strong tier) in Smart mode, not only uncertain
+   lines (`POLICY.cloudChecksEveryFormula`). One-line formulas are included. Plain givens
+   (`a = 3`) and carried lines are skipped.
+3. **For two-dimensional notation the cloud also reads.** The on-device recogniser garbles
+   integrals, limits, fractions, roots and matrices, so the judge reads the image and trusts it
+   over the local reading. The local reading is sent as a hint only.
+4. **The on-device CAS stays the instant first pass and the veto against false reds.** A step it
+   proves wrong on a confident reading stays red, but only while the cloud agrees on the reading.
+   When the cloud reads a line differently, the local verdict counts for nothing (`merge.ts`).
+   Cloud reds still need the independent blind re-solve.
+5. **Calculus judging rules** (in the judge prompt):
+   - an antiderivative is right if it differentiates back to the integrand, in any equivalent form;
+   - a missing `+ C` is "unsure", never red;
+   - definite integrals are judged by their exact or correctly rounded value;
+   - in a substitution, `dx` and the limits must be transformed;
+   - in integration by parts, check u, dv, v and the sign.
+6. **Local mode** remains the offline option that sends nothing.

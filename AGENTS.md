@@ -97,6 +97,13 @@ the spec), `RESEARCH-recognition.md`, `RESEARCH-ux.md`. Shared types:
 - The tutor opens only when asked: "Ask by voice" (push-to-talk), the AI selector, or
   right-click/long-press on ink. It never pops up or listens on its own.
 
+**Owner priorities (2026-10-17, binding; see ARCHITECTURE §F; override the above where they differ)**:
+- The main use is complex maths: integrals, derivatives, limits, series, matrices.
+- In Smart, the cloud model (strong tier) checks every formula. The on-device CAS is the instant
+  first pass and the veto against false reds, valid only while the cloud agrees on the reading.
+- For 2-D notation the cloud reads from the image. The local reading is only a hint (this
+  overrides non-negotiable 2 below).
+
 **What it does**:
 - recognises handwriting and handwritten formulas live, on-device first;
 - checks each math step against the one before;
