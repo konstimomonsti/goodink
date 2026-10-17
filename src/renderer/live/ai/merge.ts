@@ -59,7 +59,8 @@ export interface LiveBlockCheck extends BlockCheck {
 
 const demote = (i: Issue): Issue => ({ ...i, severity: 'unsure', confidence: Math.min(i.confidence, 0.6) });
 
-const squash = (t: string) => t.replace(/\s+/g, '');
+/** a reading without layout and notation noise: spaces, braces, backslashes, cdot and times signs */
+const squash = (t: string) => t.replace(/\\(cdot|times)/g, '*').replace(/[\s{}\\]/g, '').replace(/[·×]/g, '*');
 
 export function mergeCheck(a: { blockId: string; pageId: string; recognition: BlockRecognition; local: LocalResult; ai: AiOutcome | null; ms: number; via: BlockCheck['via'] }): LiveBlockCheck {
   const lines: LineCheck[] = [];
@@ -70,7 +71,8 @@ export function mergeCheck(a: { blockId: string; pageId: string; recognition: Bl
     const A = a.ai?.lines.find((l) => l.lineId === id);
     // the cloud read this line differently (an integral, a fraction the recogniser mangled): the
     // local verdict is about another formula and counts for nothing, either way
-    const misread = !!A?.corrected && squash(A.corrected) !== squash(rec.text) && squash(A.corrected) !== squash(rec.latex);
+    // (against the recogniser's own text: rec.latex may already carry the AI's reading for display)
+    const misread = !!A?.corrected && squash(A.corrected) !== squash(rec.text);
     const L: Verdict = misread ? 'none' : localLine?.verdict ?? 'none';
     const localIssues = misread ? [] : a.local.issues.filter((i) => i.lineId === id);
     const casError = localIssues.find((i) => i.severity === 'error');
@@ -97,7 +99,8 @@ export function mergeCheck(a: { blockId: string; pageId: string; recognition: Bl
       if (A.verdict === 'error') {
         if (A.confirmed && !A.refuted) {
           verdict = 'error';
-          out.push(aiIssue(A, 'error'));
+          // on a misread line the character positions belong to the misreading: mark the whole line
+          out.push(misread ? { ...aiIssue(A, 'error'), span: null } : aiIssue(A, 'error'));
         } else if (A.refuted && !A.confirmed && L !== 'error') verdict = 'ok'; // the independent check found it correct
         else unsure(A.title || A.detail ? aiIssue(A, 'unsure') : null);
       } else if (A.verdict === 'ok') {

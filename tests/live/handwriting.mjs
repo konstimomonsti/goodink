@@ -38,6 +38,7 @@ const cat = (...parts) => parts.flat();
 
 /** char -> { w: advance width, s: strokes (arrays of [x, y]) } */
 const G = {
+  '∫': { w: 0.42, s: [[[0.44, 1.12], [0.38, 1.19], [0.3, 1.14], [0.26, 0.95], [0.22, 0.4], [0.18, -0.2], [0.13, -0.33], [0.05, -0.36], [0.0, -0.3]]] },
   a: { w: 0.42, s: [cat(arc(0.2, 0.25, 0.19, 0.24, 50, 375), [[0.39, 0.5], [0.39, 0.06], [0.44, 0]])] },
   b: { w: 0.4, s: [cat([[0.02, 0.82], [0.02, 0]], arc(0.2, 0.24, 0.18, 0.24, 200, -170))] },
   c: { w: 0.36, s: [arc(0.2, 0.25, 0.19, 0.25, 40, 320)] },
@@ -155,6 +156,15 @@ function parse(src) {
       i += 5;
       return { t: 'frac', num: group(), den: group() };
     }
+    if (src.startsWith('\\int', i)) {
+      i += 4;
+      let lo = null, hi = null;
+      for (let k = 0; k < 2; k++) {
+        if (src[i] === '_') { i++; lo = group(); }
+        else if (src[i] === '^') { i++; hi = group(); }
+      }
+      return { t: 'int', lo, hi };
+    }
     if (src.startsWith('\\sqrt', i)) {
       i += 5;
       return { t: 'sqrt', body: group() };
@@ -206,6 +216,13 @@ function layout(items, k, x, y, marks) {
       marks.push({ kind: 'bar', x0: x, x1: x + w, y: bar, k });
       layout(it.den, kk, x + (w - wd) / 2, bar - 0.13 * k - 0.7 * kk, marks);
       x += w + GAP * k;
+    } else if (it.t === 'int') {
+      // the sign first, then its upper and lower limit, as people write them
+      marks.push({ kind: 'glyph', c: '∫', x, y, k });
+      const kl = k * 0.55;
+      const xh = it.hi ? layout(it.hi, kl, x + 0.4 * k, y + 0.95 * k, marks) : x;
+      const xl = it.lo ? layout(it.lo, kl, x + 0.02 * k, y - 0.62 * k, marks) : x;
+      x = Math.max(x + (G['∫'].w + GAP) * k, xh + GAP * k, xl + GAP * k);
     } else if (it.t === 'sqrt') {
       const wb = measure(it.body, k);
       marks.push({ kind: 'radical', x, y, k, w: wb + 0.1 * k });

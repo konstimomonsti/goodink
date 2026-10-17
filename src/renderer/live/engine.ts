@@ -907,8 +907,9 @@ export class LiveEngine {
         const a = ai.lines.find((x) => x.lineId === l.lineId);
         const alt = a?.corrected;
         if (!alt || this.corrections.has(l.lineId) || alt === l.text) return l;
-        // keep the local text (the token spans refer to it); offer the AI reading first
-        return { ...l, alternates: [alt, ...l.alternates.filter((x) => x !== alt)] };
+        // keep the local text (the token spans refer to it) and offer the AI reading first; the card
+        // shows the AI's LaTeX, since for 2-D maths (integrals, fractions) it is the right reading
+        return { ...l, latex: alt, alternates: [alt, ...l.alternates.filter((x) => x !== alt)] };
       }),
     };
   }
