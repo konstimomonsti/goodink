@@ -14,23 +14,25 @@
  */
 export const JUDGE_SYSTEM = `You check one step of a student's handwritten maths, like a careful university teacher who only marks what is certainly wrong. Any level: school algebra to a full mathematics degree (analysis, linear and abstract algebra, ε-δ arguments, induction, quantifier logic, probability).
 Input: the earlier steps as LaTeX (already checked), a local recogniser's reading of the new step (LaTeX and linear text), and an image of the new step's handwriting (a matrix, integral with limits, cases or aligned derivation is shown whole).
-1. reading_ok: true if the image shows the recogniser's reading (ignore spacing and notation style). If the image clearly shows something else, false, and give the right reading in "corrected" as LaTeX. Otherwise "corrected" is "".
+1. reading_ok: true if the image shows the recogniser's reading (ignore spacing and notation style). If the image shows something else, false, and give the right reading in "corrected" as LaTeX. Otherwise "corrected" is "". The recogniser often garbles two-dimensional notation (integrals and their limits, fractions, roots, sums, limits, matrices, exponents): for those, read the image yourself and trust it over the recogniser.
 2. step_kind: "proof" for a step of a proof or argument (claims, quantifiers, "assume", "hence", "by induction", "let ε>0", set or group properties); otherwise "calculation".
 3. Judge the step as written (corrected if you corrected it), only against the earlier steps and standard definitions and theorems:
    verdict "ok": correct, or follows correctly from the earlier steps. Unfinished work is fine.
    verdict "error": only if you are certain it is wrong or does not follow. For a proof step, also only if you can name one specific logical gap in "gap" (e.g. "the induction step assumes P(k+1)", "the order of ∀ε ∃δ is swapped", "δ depends on x", "uses commutativity in a group not known to be abelian", "divides by a possibly zero determinant").
    verdict "unsure": the handwriting is ambiguous, the step is not fully justified but not clearly wrong, or you cannot decide.
+   Calculus: an antiderivative is right if differentiating it gives the integrand, in any equivalent form and with any constant (-cos x + C and 1 - cos x + C are both right). A missing + C on an indefinite integral is "unsure" (title "Constant of integration"), never "error". A definite integral is right if its value equals the exact value, written exactly or correctly rounded. In a substitution, check that dx and the limits were transformed too; in integration by parts, check u, dv, v and the sign of the ∫v du term; for limits, derivatives and series, judge the value and the rule used.
 4. For "error" or "unsure":
    wrong_span: the shortest exact substring of the step's reading that is wrong (e.g. "10", "-3", "x^2"), or "".
    title: 2 to 4 words naming the mistake (e.g. "Sign error", "Quantifier order"). detail: one sentence saying what is wrong without giving the correct result, maths in $...$.
    hint: a question that nudges towards the problem without revealing the answer (for a proof: a precise question about the missing justification). fix: for "error", the corrected step in LaTeX.
    gap: for a proof step, the specific logical gap in one sentence; otherwise "".
-   misconception: for "error", one tag: sign-move, distribute-first-term, square-of-sum, cancel-terms, divide-one-side, sqrt-of-sum, exponent-product, fraction-add-denominators, order-of-operations, arithmetic, inverse-operation, inequality-flip, power-rule, derivative, log-rule, function-linearity, like-terms, dropped-term, extra-term, proof-gap, other.
+   misconception: for "error", one tag: sign-move, distribute-first-term, square-of-sum, cancel-terms, divide-one-side, sqrt-of-sum, exponent-product, fraction-add-denominators, order-of-operations, arithmetic, inverse-operation, inequality-flip, power-rule, derivative, log-rule, function-linearity, like-terms, dropped-term, extra-term, chain-rule, integration-constant, antiderivative, substitution, integration-by-parts, integration-limits, proof-gap, other.
    For "ok" all of these are "".
 5. concept: the topic in 2 to 4 words.
 Examples:
 earlier: 2x+3=7 | step: 2x=10 -> {"reading_ok":true,"corrected":"","latex":"2x=10","step_kind":"calculation","verdict":"error","wrong_span":"10","title":"Subtraction error","detail":"Moving $+3$ across should subtract it from $7$.","hint":"What is $7-3$?","fix":"2x=4","gap":"","misconception":"sign-move","concept":"Linear equations"}
 earlier: (none) | step: (a+b)^2=a^2+b^2 -> {"reading_ok":true,"corrected":"","latex":"(a+b)^2=a^2+b^2","step_kind":"calculation","verdict":"error","wrong_span":"a^2+b^2","title":"Missing middle term","detail":"Squaring a sum does not square each term separately.","hint":"Write $(a+b)^2$ as $(a+b)(a+b)$ and multiply out.","fix":"(a+b)^2=a^2+2ab+b^2","gap":"","misconception":"square-of-sum","concept":"Binomial expansion"}
+earlier: \\\\int 2x\\\\cos(x^2)\\\\,dx | step: =\\\\sin(x^2)\\\\cdot 2x+C (recogniser read "=sin(x2)2x+C") -> {"reading_ok":false,"corrected":"=\\\\sin(x^2)\\\\cdot 2x+C","latex":"=\\\\sin(x^2)\\\\cdot 2x+C","step_kind":"calculation","verdict":"error","wrong_span":"\\\\cdot 2x","title":"Substitution not finished","detail":"Differentiating this result does not give $2x\\\\cos(x^2)$.","hint":"With $u=x^2$, what does $2x\\\\,dx$ become?","fix":"=\\\\sin(x^2)+C","gap":"","misconception":"substitution","concept":"Integration by substitution"}
 earlier: x^2=9 | step: x=3 (image shows x=±3) -> {"reading_ok":false,"corrected":"x=\\\\pm 3","latex":"x=\\\\pm 3","step_kind":"calculation","verdict":"ok","wrong_span":"","title":"","detail":"","hint":"","fix":"","gap":"","misconception":"","concept":"Quadratic equations"}
 earlier: \\\\text{Assume } P(k) \\\\text{ holds.} | step: \\\\text{Then } P(k+1) \\\\text{ holds, so } \\\\sum_{i=1}^{k+1} i = \\\\tfrac{(k+1)(k+2)}{2} -> {"reading_ok":true,"corrected":"","latex":"...","step_kind":"proof","verdict":"error","wrong_span":"","title":"Step not shown","detail":"The step concludes $P(k+1)$ without deriving it from $P(k)$.","hint":"How can you write $\\\\sum_{i=1}^{k+1} i$ using $\\\\sum_{i=1}^{k} i$?","fix":"\\\\sum_{i=1}^{k+1} i = \\\\tfrac{k(k+1)}{2} + (k+1) = \\\\tfrac{(k+1)(k+2)}{2}","gap":"The induction step asserts P(k+1) instead of deriving it from P(k).","misconception":"proof-gap","concept":"Induction"}
 Reply with the JSON object only.`;
@@ -71,6 +73,12 @@ export const MISCONCEPTIONS: Record<string, { label: string; rule: string }> = {
   'extra-term': { label: 'Extra term', rule: 'A rewrite must not add terms out of nowhere; check each term comes from the line above.' },
   'proof-gap': { label: 'Gap in a proof', rule: 'Each line of a proof must follow from earlier lines, the hypotheses or a named definition or theorem; say which one you use.' },
   other: { label: 'Other mistakes', rule: 'Check each step against the one before it: does it say the same thing?' },
+  'chain-rule': { label: 'Chain rule', rule: "Differentiate the outside, keep the inside, then multiply by the derivative of the inside: $(f(g(x)))'=f'(g(x))\\,g'(x)$." },
+  'integration-constant': { label: 'Constant of integration', rule: 'An indefinite integral is a whole family of functions: write $+\\,C$.' },
+  antiderivative: { label: 'Antiderivatives', rule: 'Check an antiderivative by differentiating it: you must get the integrand back.' },
+  substitution: { label: 'Integration by substitution', rule: "With $u=g(x)$, replace $dx$ too: $du=g'(x)\\,dx$, and change the limits of a definite integral." },
+  'integration-by-parts': { label: 'Integration by parts', rule: '$\\int u\\,dv = uv - \\int v\\,du$: mind the minus sign and integrate $dv$ to get $v$.' },
+  'integration-limits': { label: 'Limits of integration', rule: '$\\int_a^b f = F(b)-F(a)$: upper limit first, and change the limits when you substitute.' },
 };
 
 /** A tag from the judge as one of MISCONCEPTIONS' keys ('other' when unknown). */
