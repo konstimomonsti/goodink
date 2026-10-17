@@ -486,13 +486,17 @@ test('token and cost accounting: reported usage, or an estimate when the provide
   assert.equal(P.priceOf('unknown-model'), null);
 });
 
-test('crop geometry: x-height about 24 px, 12 px padding, long edge capped', () => {
+test('crop geometry: x-height at least 24 px, size floors, 12 px padding, long edge capped', () => {
   const g = CR.cropGeometry([100, 100, 220, 130], { lineHeight: 30 });
-  // x-height = 0.45 * 30 pt = 13.5 pt -> 24 px
-  assert.ok(Math.abs(g.s * 13.5 - 24) < 0.01);
+  // x-height = 0.45 * 30 pt = 13.5 pt -> at least 24 px
+  assert.ok(g.s * 13.5 >= 24 - 0.01);
   assert.equal(g.pw, Math.round(120 * g.s + 24));
+  assert.ok(Math.max(g.pw, g.ph) >= 480 && Math.min(g.pw, g.ph) >= 120, `${g.pw}x${g.ph}`);
   const long = CR.cropGeometry([0, 0, 2000, 30], { lineHeight: 30 });
   assert.ok(long.pw <= 1000);
+  // a definite integral: its limits make the line tall, which used to shrink it to ~123 x 77 px
+  const integral = CR.cropGeometry([90, 140, 240, 205], { lineHeight: 65 });
+  assert.ok(integral.pw >= 480 && integral.ph >= 120, `${integral.pw}x${integral.ph}`);
 });
 
 // ---- streaming ----------------------------------------------------------------------------------

@@ -77,7 +77,10 @@ export const POLICY = {
     askXHeightPx: 26,
     askMaxLong: 1200,
     minScale: 0.3,
-    maxScale: 6,
+    maxScale: 8,
+    /** floors on the output size, so 2-D formulas (integrals with limits) stay readable */
+    minLongPx: 480,
+    minShortPx: 120,
     /** thinnest stroke in output px, so small crops stay legible */
     minStrokePx: 1.2,
     /** black ink on white (grayscale content); PNG keeps two-tone ink tiny and sharp */

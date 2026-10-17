@@ -29,7 +29,10 @@ export function cropGeometry(bbox: BBox, o: CropOpts) {
   const bw = Math.max(1, bbox[2] - bbox[0]), bh = Math.max(1, bbox[3] - bbox[1]);
   const maxLong = o.maxLong ?? P.maxLong;
   let s = Math.min(P.maxScale, Math.max(P.minScale, (o.xHeightPx ?? P.xHeightPx) / (lh * P.xHeightRatio)));
-  // a long line: keep the long edge within the cap (the x-height then shrinks a little)
+  // never too small to read: an integral's limits make its line tall, so the x-height estimate above
+  // shrinks it (a 2-D formula came out 123 x 77 px); keep a floor on both edges ...
+  s = Math.max(s, Math.min(P.maxScale, Math.max((P.minLongPx - 2 * P.padPx) / Math.max(bw, bh), (P.minShortPx - 2 * P.padPx) / Math.min(bw, bh))));
+  // ... and a long line keeps its long edge within the cap (the x-height then shrinks a little)
   s = Math.min(s, (maxLong - 2 * P.padPx) / Math.max(bw, bh));
   const pad = P.padPx / s;
   return { x0: bbox[0] - pad, y0: bbox[1] - pad, s, pw: Math.max(16, Math.round(bw * s + 2 * P.padPx)), ph: Math.max(16, Math.round(bh * s + 2 * P.padPx)) };
