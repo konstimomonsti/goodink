@@ -45,7 +45,14 @@ export const POLICY = {
   /** verification tier per mode (Max verifies with the strong model, and may think) */
   verifyTier: { smart: 'fast', max: 'strong' } as Record<'smart' | 'max', Tier>,
   /** earlier steps sent as text with a judge or verify call */
-  priorLines: 3,
+  priorLines: 1000,
+  /** the rest of the page (other worked parts, the problem statement, definitions, typed text), as
+   *  context for a check: complicated problems need it, and it is the same for every line of a
+   *  page, so the provider's prompt cache reuses it (owner, 2026-10-17: a big context window) */
+  contextChars: 40_000,
+  /** what the tutor sees when asked: this page and its neighbours */
+  askContextChars: 120_000,
+  askNeighbourPages: 1,
   /** show the AI's unconfirmed finding as amber while the second opinion runs */
   showUnconfirmedAsAmber: true,
   /** Smart judges a line only when the CAS left it undecided (or a shaky local error) */
@@ -94,11 +101,11 @@ export const POLICY = {
     /** one judged line of compact JSON (~80 tokens typical) */
     judge: 360,
     /** Max mode judge (still no thinking) */
-    judgeStrong: 700,
+    judgeStrong: 1200,
     verifyFast: 320,
     /** Max mode verification may think */
     verifyStrong: 4000,
-    answer: 700,
+    answer: 1600,
     transcribe: 600,
   },
 

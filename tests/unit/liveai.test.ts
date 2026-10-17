@@ -530,7 +530,9 @@ test('ask turns carry history and the new question', () => {
 });
 
 test('tutor prompts: one step, ask before telling, grounded on the verified fix, answer only at "fix"', () => {
-  assert.match(P.TUTOR_SYSTEM, /One step per reply, at most 60 words/);
+  assert.match(P.TUTOR_SYSTEM, /Hints and next steps: one step per reply, at most 60 words/);
+  assert.match(P.TUTOR_SYSTEM, /full mathematics degree/);
+  assert.match(P.TUTOR_SYSTEM, /surrounding notes/);
   assert.match(P.TUTOR_SYSTEM, /Ask before telling/);
   assert.match(P.TUTOR_SYSTEM, /different numbers/);
   const issue = { title: 'Subtraction error', detail: 'd', lineText: '2x=10', fix: '2x=4' };

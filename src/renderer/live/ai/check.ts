@@ -44,6 +44,8 @@ export interface JudgeInput {
   prior: LineRecognition[];
   /** crop of this line only */
   image: CropImage;
+  /** the rest of the page as text (problem statement, definitions, other parts) */
+  context?: string;
   /** the local CAS verdict on this line */
   localVerdict: Verdict;
   tier: Tier;
@@ -88,7 +90,7 @@ async function runJudge(call: Caller, input: JudgeInput, extra = ''): Promise<{ 
       system: JUDGE_SYSTEM,
       cacheSystem: true,
       images: [imgPart(input.image)],
-      turns: [{ role: 'user', text: judgeUser(prior, input.line.text, input.line.latex) + extra }],
+      turns: [{ role: 'user', text: judgeUser(prior, input.line.text, input.line.latex, input.context) + extra }],
       maxTokens: input.tier === 'fast' ? POLICY.budget.judge : POLICY.budget.judgeStrong,
       json: { name: 'step_judge', schema: JUDGE_SCHEMA },
       signal: input.signal,
@@ -108,7 +110,7 @@ async function runVerify(call: Caller, input: JudgeInput, reading: string, signa
       system: VERIFY_SYSTEM,
       cacheSystem: true,
       images: [imgPart(input.image)],
-      turns: [{ role: 'user', text: verifyUser(prior, reading) }],
+      turns: [{ role: 'user', text: verifyUser(prior, reading, input.context) }],
       maxTokens: strong ? POLICY.budget.verifyStrong : POLICY.budget.verifyFast,
       json: { name: 'step_verify', schema: VERIFY_SCHEMA },
       signal,

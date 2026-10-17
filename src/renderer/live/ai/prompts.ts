@@ -42,9 +42,13 @@ export interface PriorStep {
   latex: string;
 }
 
-export function judgeUser(prior: PriorStep[], reading: string, latex: string): string {
+/** The rest of the learner's page, first in the message (cached across the page's lines). */
+export const contextBlock = (context?: string) =>
+  context?.trim() ? `Context from the learner's page (the problem statement, definitions, other parts; for reference, not to be judged):\n${context.trim()}\n\n` : '';
+
+export function judgeUser(prior: PriorStep[], reading: string, latex: string, context?: string): string {
   const earlier = prior.length ? prior.map((p, i) => `${i + 1}. ${p.latex || p.text || '?'}`).join('\n') : '(none: judge the step on its own)';
-  return `Earlier steps (LaTeX):\n${earlier}\n\nRecogniser reading of the new step:\nlatex: ${latex || reading || '?'}\ntext: ${reading || '?'}`;
+  return `${contextBlock(context)}Earlier steps of this problem (LaTeX):\n${earlier}\n\nRecogniser reading of the new step:\nlatex: ${latex || reading || '?'}\ntext: ${reading || '?'}`;
 }
 
 /**
@@ -103,16 +107,18 @@ You get the earlier steps as LaTeX, the step to verify as LaTeX, and an image of
 5. reason: one short sentence.
 Reply with JSON only: {"readingOk":true,"work":"...","valid":"yes|no|unsure","gap":"","reason":"..."}`;
 
-export function verifyUser(prev: string[], line: string): string {
-  return `Earlier steps:\n${prev.length ? prev.join('\n') : '(none: judge the step on its own)'}\n\nStep to verify:\n${line}`;
+export function verifyUser(prev: string[], line: string, context?: string): string {
+  return `${contextBlock(context)}Earlier steps:\n${prev.length ? prev.join('\n') : '(none: judge the step on its own)'}\n\nStep to verify:\n${line}`;
 }
 
 // ---- tutoring (RESEARCH-ux §1.2, §2 rules 7–8) ----------------------------------------------------
 
-export const TUTOR_SYSTEM = `You are a patient maths tutor (school to university level) looking at a learner's handwritten notes.
-The image shows the part of the page the learner is asking about; the transcription given with it may contain misreads.
+export const TUTOR_SYSTEM = `You are a patient maths tutor for every level, from school to a full mathematics degree and beyond (real and complex analysis, linear and abstract algebra, topology, measure and probability theory, differential equations, numerical methods, logic and proofs), looking at a learner's handwritten notes.
+The image shows the part of the page the learner is asking about; the transcription given with it may contain misreads, so trust the image for formulas.
+You may also get the learner's surrounding notes (the problem statement, definitions, earlier parts, nearby pages) as context: use them, keep to the learner's notation, and build on results they already have.
 How you teach:
-- One step per reply, at most 60 words. No preamble.
+- Hints and next steps: one step per reply, at most 60 words. No preamble.
+- Free questions and explanations: as long as the problem needs, but focused (at most about 200 words), one idea at a time.
 - Ask before telling: prefer a short guiding question the learner can answer.
 - Never state a corrected step, a corrected value or a final answer to the learner's own work unless the request contains the words "Show the fix". This holds even if the learner asks for the answer: then give a hint instead.
 - If a verified solution or correct step is given below, it is the truth: follow it and never contradict it.

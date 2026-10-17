@@ -754,6 +754,34 @@ export class LiveEngine {
    * corrected it): a wrong answer written next to the learner's work is as bad as a false red.
    * A shaky assignment earlier in the block withholds the results that use its variable.
    */
+  /**
+   * The rest of a page as text for the cloud: the other blocks' readings and typed text, in reading
+   * order, nearest the block first when it must be cut. Complicated problems need the statement,
+   * the definitions and the earlier parts.
+   */
+  pageContext(pageId: string, exceptBlockId: string | null, maxChars: number): string {
+    const st = this.pages.get(pageId);
+    if (!st || maxChars <= 0) return '';
+    const y0 = st.blocks.find((b) => b.id === exceptBlockId)?.bbox[1] ?? 0;
+    const parts: { y: number; text: string }[] = [];
+    for (const b of st.blocks) {
+      if (b.id === exceptBlockId) continue;
+      const c = this.checks.get(b.id);
+      if (!c) continue;
+      const lines = c.recognition.lines.map((l) => (l.kind === 'math' ? `$${l.latex || l.text}$` : l.text)).filter((t) => t && t !== '$$');
+      if (lines.length) parts.push({ y: b.bbox[1], text: lines.join('\n') });
+    }
+    for (const o of this.source.content(pageId)?.objects ?? []) if (o.type === 'text' && o.text.trim()) parts.push({ y: o.y, text: o.text.trim() });
+    const kept: typeof parts = [];
+    let used = 0;
+    for (const p of [...parts].sort((a, b) => Math.abs(a.y - y0) - Math.abs(b.y - y0))) {
+      if (used + p.text.length + 2 > maxChars) break;
+      kept.push(p);
+      used += p.text.length + 2;
+    }
+    return kept.sort((a, b) => a.y - b.y).map((p) => p.text).join('\n\n');
+  }
+
   private evaluate(pageId: string, block: InkBlock, rec: BlockRecognition, ai?: AiOutcome) {
     if (typeof this.math.evaluate !== 'function') return [];
     const read = (l: LineRecognition): LineRecognition => {
@@ -855,6 +883,7 @@ export class LiveEngine {
               line: l,
               prior: rec.lines.slice(0, idx).map((p) => (this.corrections.has(p.lineId) ? p : partials.get(p.lineId)?.corrected ? { ...p, text: partials.get(p.lineId)!.corrected! } : p)),
               image,
+              context: this.pageContext(pageId, block.id, POLICY.contextChars),
               localVerdict: local.lines.find((x) => x.lineId === l.lineId)?.verdict ?? 'none',
               tier,
               verifyTier: POLICY.verifyTier[mode === 'max' ? 'max' : 'smart'],
@@ -1146,6 +1175,27 @@ export type RealUiEngine = LiveUiEngine & {
  */
 export function createUiEngine(s: LiveSource & { pages: readonly { id: string }[] }, o: LiveEngineOptions = {}): RealUiEngine {
   const e = new LiveEngine(s, o);
+  /** What the tutor sees around a question: this page and its neighbours (a big context window). */
+  const wideContext = (pageId: string, blockId: string | null) => {
+    const ids = s.pages.map((p) => p.id);
+    const i = ids.indexOf(pageId);
+    const budget = POLICY.askContextChars;
+    const share = Math.round((budget * 0.2) / Math.max(1, POLICY.askNeighbourPages));
+    const out: string[] = [];
+    for (let k = POLICY.askNeighbourPages; k >= 1; k--) {
+      const prev = i - k >= 0 ? e.pageContext(ids[i - k], null, share) : '';
+      if (prev) out.push(`[page ${i - k + 1}]\n${prev}`);
+    }
+    const here = e.pageContext(pageId, blockId, Math.round(budget * 0.6));
+    if (here) out.push(`[this page, ${i + 1}]\n${here}`);
+    for (let k = 1; k <= POLICY.askNeighbourPages; k++) {
+      const next = i + k < ids.length ? e.pageContext(ids[i + k], null, share) : '';
+      if (next) out.push(`[page ${i + k + 1}]\n${next}`);
+    }
+    return out.length ? `The learner's notes around this (for context):\n${out.join('\n\n')}` : '';
+  };
+  const withWide = (part: string, pageId: string, blockId: string | null) =>
+    [wideContext(pageId, blockId), part ? `The part the question is about:\n${part}` : ''].filter(Boolean).join('\n\n');
   const statusFns = new Set<(st: LiveStatus) => void>();
   const decoFns = new Set<(pageId: string, d: UiDecoration[]) => void>();
   const status = (): LiveStatus => {
@@ -1213,12 +1263,12 @@ export function createUiEngine(s: LiveSource & { pages: readonly { id: string }[
       if (insight) {
         const check = e.check(insight.block.id) ?? (insight.check as LiveBlockCheck | null);
         if (!images.length) images = await imageOf(insight.block.id);
-        context = contextOf(check, insight.focusLineId);
+        context = withWide(contextOf(check, insight.focusLineId), insight.pageId, insight.block.id);
         if (ctx.action !== 'check') ({ issue, grounding } = issueOf(check, insight.focusLineId));
       } else if (ctx.region) {
         // ink inside the loop that the engine has read: its reading helps the model
         const b = e.blockFor(ctx.region.pageId, ctx.region.bbox as BBox);
-        if (b) context = contextOf(e.check(b.id), null);
+        context = withWide(b ? contextOf(e.check(b.id), null) : '', ctx.region.pageId, b?.id ?? null);
       }
       if (!images.length && !context) throw new Error('There is nothing here to ask about yet. Write something, or draw a loop around it.');
       const before = e.ai.meter.input + e.ai.meter.output;

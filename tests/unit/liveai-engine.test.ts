@@ -426,6 +426,20 @@ test('Smart sends every formula to the better model, but not plain givens', () =
   assert.equal(needsAi('smart', line(0.98, 'a=3'), none), false, 'a plain given has nothing to check');
 });
 
+test('the cloud gets the rest of the page as context (big context for complicated problems)', async () => {
+  const { s, e, p } = setup('smart', standard(() => false));
+  s.add(write('a=12', 0)); // a given far above: its own block
+  s.add(write('4x+1=9', 4));
+  s.add(write('4x=8', 5));
+  await until(() => p.judges().some((c) => /4x=8/.test(c.user)));
+  const call = p.judges().find((c) => /4x=8/.test(c.user))!;
+  assert.match(call.user, /^Context from the learner's page/, 'context comes first (cached across the page)');
+  assert.match(call.user, /\$a=12\$/, 'the other block is in it');
+  assert.match(call.user, /Earlier steps of this problem \(LaTeX\):\n1\. 4x\+1=9/, 'the whole problem so far');
+  assert.equal(e.pageContext('p1', null, 5), '', 'a budget too small for anything gives nothing');
+  e.dispose();
+});
+
 test('mistake journal: confirmed errors are kept per notebook, grouped, and become flashcards', async () => {
   const kv = memKV();
   const { s, e } = setup('local', () => '', { kv });

@@ -161,3 +161,17 @@ These override §A.1–A.3 and §E.2 where they differ.
    - in a substitution, `dx` and the limits must be transformed;
    - in integration by parts, check u, dv, v and the sign.
 6. **Local mode** remains the offline option that sends nothing.
+7. **Every level, with a big context window** (owner, 2026-10-17). Recognition and tips cover
+   all of a mathematics degree. Complicated problems need context, so the cloud gets it:
+   - **Checks** get the whole problem (every earlier line of the block,
+     `POLICY.priorLines = 1000`) and the rest of the page as text: other parts, the problem
+     statement, definitions and typed text, nearest first, up to `POLICY.contextChars` (40,000
+     characters, about 10k tokens).
+   - The page context comes first in the message, so the provider's prompt cache reuses it for
+     every line of the page.
+   - The line's cache key deliberately ignores the page context, so editing elsewhere does not
+     re-send checked lines.
+   - **The tutor (on request)** gets this page and its neighbouring pages
+     (`POLICY.askContextChars` = 120,000 characters, `askNeighbourPages` = 1).
+   - Hints stay at one step of at most 60 words. Free questions and explanations may run to about
+     200 words.
