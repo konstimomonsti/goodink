@@ -206,8 +206,12 @@ export function findFractions(inks: Ink[], unit: number): Frac[] {
     // (the "1" ending "3x = 1" right above the numerator of "x = 1/3")
     // (a glyph over a wider bar is itself part of a fraction, not a row-mate: 3/4 + 1/4)
     const stacked = (o: Ink) => bars.some((b2) => b2 !== o && b2.w > o.w * 1.2 && o.cx >= b2.x0 && o.cx <= b2.x1 && Math.abs(o.cy - b2.cy) < unit * 1.6);
+    // (ink level with the bar is the fraction's own line, its "=" or "x": never a reason to drop a
+    // part, or an inline denominator next to the "=" would be lost: x = 1/3)
     const inRow = (k: Ink) =>
-      inks.some((o) => o !== k && o !== bar && (o.cx < span0 || o.cx > span1) && Math.abs(o.cy - k.cy) < unit * 0.45 && Math.max(o.x0 - k.x1, k.x0 - o.x1) < unit * 2 && !stacked(o));
+      inks.some(
+        (o) => o !== k && o !== bar && (o.cx < span0 || o.cx > span1) && Math.abs(o.cy - k.cy) < unit * 0.45 && Math.abs(o.cy - bar.cy) > unit * 0.75 && Math.max(o.x0 - k.x1, k.x0 - o.x1) < unit * 2 && !stacked(o),
+      );
     for (let i = lower(span0); i < byX.length && cxs[i] <= span1; i++) {
       const k = byX[i];
       if (k === bar || used.has(k) || inRow(k)) continue;

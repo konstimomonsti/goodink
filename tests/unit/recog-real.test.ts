@@ -68,3 +68,8 @@ test('real ink: a 5 with a separate flag and a stacked fraction under the line a
   const one = strokes.find((s) => Math.round(s.bbox[0]) === 230 && Math.round(s.bbox[1]) === 162)!;
   assert.ok(blocks[1].lines[1].strokeIds.includes(one.id));
 });
+
+test('real ink: inline stacked fractions next to "=" and "+" stay whole and on their line', () => {
+  const blocks = groupStrokes('p', load('inline-fractions.json'));
+  assert.deepEqual(blocks.map((b) => b.lines.map((l) => l.strokeIds.length)), [[8], [10, 6, 7], [7, 10]], 'x = 1/3 and 2/3 + x = 1, each one line');
+});
