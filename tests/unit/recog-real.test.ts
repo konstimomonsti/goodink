@@ -59,3 +59,12 @@ test('impossible readings are repaired with handwriting look-alikes, a digit bef
   assert.ok(r.includes('3x+2=8'), 'the all-digit reading is offered too');
   assert.deepEqual(repairs('((('), [], 'nothing valid nearby: no repair');
 });
+
+test('real ink: a 5 with a separate flag and a stacked fraction under the line above', () => {
+  const strokes = load('steps-fraction.json');
+  const blocks = groupStrokes('p', strokes);
+  assert.deepEqual(blocks.map((b) => b.lines.map((l) => l.strokeIds.length)), [[8], [10, 6, 7]], 'earlier line; then 3x+5=6, 3x=1, x=1/3');
+  // the "1" ending 3x=1 is in that line, not stacked onto the numerator of 1/3
+  const one = strokes.find((s) => Math.round(s.bbox[0]) === 230 && Math.round(s.bbox[1]) === 162)!;
+  assert.ok(blocks[1].lines[1].strokeIds.includes(one.id));
+});

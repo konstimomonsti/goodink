@@ -180,7 +180,11 @@ export function findFractions(inks: Ink[], unit: number): Frac[] {
   const out: Frac[] = [];
   const used = new Set<Ink>();
   // widest bars first, so a bar inside a numerator doesn't steal its parent's ink
-  const bars = inks.filter((k) => k.flat && k.w > unit * 0.55).sort((a, b) => b.w - a.w);
+  // a bar may be a little curved or tilted when written quickly; such a bar needs real glyphs on
+  // both sides (a dash under it would make it one bar of an "=")
+  const dashy = (k: Ink) => k.w >= k.h * 1.3 && k.h < unit * 0.4;
+  const barLike = (k: Ink) => k.flat || (k.w > unit * 0.55 && k.h <= k.w * 0.5 && k.straight > 0.7);
+  const bars = inks.filter((k) => barLike(k) && k.w > unit * 0.55).sort((a, b) => b.w - a.w);
   if (!bars.length) return out;
   // strokes by centre x, so each bar only looks at the strokes over its span
   const byX = inks.slice().sort((a, b) => a.cx - b.cx);
@@ -198,18 +202,26 @@ export function findFractions(inks: Ink[], unit: number): Frac[] {
     if (used.has(bar)) continue;
     const span0 = bar.x0 - bar.w * 0.08, span1 = bar.x1 + bar.w * 0.08;
     let num: Ink[] = [], den: Ink[] = [];
+    // ink with row-mates beside it at its own height, outside the bar's span, belongs to that row
+    // (the "1" ending "3x = 1" right above the numerator of "x = 1/3")
+    // (a glyph over a wider bar is itself part of a fraction, not a row-mate: 3/4 + 1/4)
+    const stacked = (o: Ink) => bars.some((b2) => b2 !== o && b2.w > o.w * 1.2 && o.cx >= b2.x0 && o.cx <= b2.x1 && Math.abs(o.cy - b2.cy) < unit * 1.6);
+    const inRow = (k: Ink) =>
+      inks.some((o) => o !== k && o !== bar && (o.cx < span0 || o.cx > span1) && Math.abs(o.cy - k.cy) < unit * 0.45 && Math.max(o.x0 - k.x1, k.x0 - o.x1) < unit * 2 && !stacked(o));
     for (let i = lower(span0); i < byX.length && cxs[i] <= span1; i++) {
       const k = byX[i];
-      if (k === bar || used.has(k)) continue;
+      if (k === bar || used.has(k) || inRow(k)) continue;
       if (k.cy < bar.cy && k.y1 <= bar.cy + unit * 0.12 && k.y1 >= bar.cy - unit * 1.6) num.push(k);
       else if (k.cy > bar.cy && k.y0 >= bar.cy - unit * 0.12 && k.y0 <= bar.cy + unit * 1.6) den.push(k);
     }
     // the parts must start close to the bar
-    const near = (set: Ink[], above: boolean) => set.some((k) => !k.flat && !k.dot && (above ? bar.cy - k.y1 : k.y0 - bar.cy) < unit * 0.75);
+    const glyph = (k: Ink) => !k.flat && !k.dot && (bar.flat || !dashy(k));
+    // handwriting leaves some air between the bar and its parts (a numerator ending ~0.8 unit above)
+    const near = (set: Ink[], above: boolean) => set.some((k) => glyph(k) && (above ? bar.cy - k.y1 : k.y0 - bar.cy) < unit * 1.0);
     if (!near(num, true) || !near(den, false)) continue;
     // "=" is two flat strokes; a stacked "=" under a numerator-like digit is still not a fraction
     // if the only ink below is another flat stroke
-    if (!den.some((k) => !k.flat && !k.dot) || !num.some((k) => !k.flat && !k.dot)) continue;
+    if (!den.some(glyph) || !num.some(glyph)) continue;
     // grow each part with ink stacked on it (tall numerators, exponents inside)
     const grow = (set: Ink[], above: boolean) => {
       const s = new Set(set);
@@ -219,7 +231,13 @@ export function findFractions(inks: Ink[], unit: number): Frac[] {
         for (const k of inks) {
           if (s.has(k) || k === bar || used.has(k) || k.cx < span0 || k.cx > span1) continue;
           if (above ? k.cy > bar.cy : k.cy < bar.cy) continue;
+          // small ink (an exponent, a dot) joins by touching; a full-size glyph must overlap a part
+          // vertically, or the line above or below would be swallowed (the "1" of "3x = 1" stacked on
+          // the numerator of "x = 1/3")
+          const small = Math.max(k.w, k.h) < unit * 0.7;
           for (const m of s) {
+            const vOverlap = Math.min(k.y1, m.y1) - Math.max(k.y0, m.y0);
+            if (!small && vOverlap < Math.min(k.h, m.h) * 0.3) continue;
             if (k.x1 >= m.x0 - unit * 0.2 && k.x0 <= m.x1 + unit * 0.2 && k.y1 >= m.y0 - unit * 0.4 && k.y0 <= m.y1 + unit * 0.4) {
               s.add(k);
               changed = true;
@@ -276,6 +294,14 @@ export function symbols(inks: Ink[], unit: number, keepApart: ReadonlySet<Ink> =
       // "=" written small or quick: two short dashes, wider than tall, one over the other. They can
       // fall below the flat-bar size or curve a little; two round dots (":") are not dashes
       const dash = (k: Ink) => k.w >= Math.max(k.h * 1.3, unit * 0.1) && k.h < unit * 0.4 && k.w < unit * 1.6;
+      // the flag of a 5 (or the top of a 7) written as a stroke of its own: a short dash on the glyph's
+      // top that starts over its right part and runs right. An accent bar (x̄) is centred: not a flag
+      const flagOf = (d: Ink, g: Ink) =>
+        dash(d) && !dash(g) && !g.flat && !g.dot && d.y1 <= g.y0 + unit * 0.25 && g.y0 - d.y1 < unit * 0.35 && d.x0 >= g.x0 + g.w * 0.2 && d.x0 <= g.cx + g.w * 0.25 && d.x1 > g.cx && d.w <= g.w * 1.8 + unit * 0.3;
+      if (flagOf(a, b) || flagOf(b, a)) {
+        union(parent, i, j);
+        continue;
+      }
       if (dash(a) && dash(b) && !(a.flat && b.flat)) {
         if (xo > Math.min(a.w, b.w) * 0.4 && yGap > -unit * 0.05 && yGap < unit * 0.6) {
           union(parent, i, j);
