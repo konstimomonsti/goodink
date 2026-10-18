@@ -154,7 +154,7 @@ export function FreeAiSetup({ compact = false }: { compact?: boolean }) {
         <strong>Free AI with Google Gemini</strong>
       </div>
       <p className="muted small">
-        Already set up: Gemini Flash (newest) with medium effort. You only need a free key from your Google account; no card is needed. On the free tier Google may use what you send to improve its products.
+        Uses Gemini Flash (newest) with medium effort. All it needs is a free key from your Google account; no card is needed. On the free tier Google may use what you send to improve its products.
       </p>
       <ol className="ai-quick-steps">
         <li>
