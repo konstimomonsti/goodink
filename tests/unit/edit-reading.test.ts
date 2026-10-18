@@ -14,6 +14,14 @@ test('lookalike symbols and the recogniser’s own alternates are accepted', () 
   assert.ok(plausibleEdit('x=3', [], 'x=3.'), 'a dropped dot');
 });
 
+test('dropping a misread exponent or a stray dot is accepted (owner, 2026-10-18)', () => {
+  assert.ok(plausibleEdit('3x+5^(-)=6', [], '3x+5=6'), 'the flag of a 5 read as an exponent minus');
+  assert.ok(plausibleEdit('3x=1,', [], '3x=1'), 'a stray comma');
+  assert.ok(plausibleEdit('3x+S^(-)=6', [], '3x+5=6'), 'together with a look-alike fix');
+  assert.ok(!plausibleEdit('3x+5^(-)=6', [], '3x+5=7'), 'but not a different number');
+  assert.ok(!plausibleEdit('x=-3', [], 'x=3'), 'nor dropping a real minus sign');
+});
+
 test('changing what is written is refused', () => {
   assert.ok(!plausibleEdit('x=3', [], 'x=2'), 'the critic’s case: 3 is not a lookalike of 2');
   assert.ok(!plausibleEdit('2x=4', [], '2x=8'));

@@ -24,16 +24,31 @@ LOOKALIKE.forEach((g, i) => g.forEach((c) => GROUP.set(c, i)));
 const norm = (s: string) => s.replace(/\s+/g, '');
 const alike = (a: string, b: string) => a === b || (GROUP.has(a) && GROUP.get(a) === GROUP.get(b));
 
+/**
+ * Readings without the recogniser's typical extras: an exponent or subscript made of a stray stroke
+ * ("5^(-)" from the separate flag of a 5) and stray dots or commas. Removing those fixes a misread;
+ * it never changes what was written in the line itself.
+ */
+function withoutExtras(read: string): string[] {
+  const noScripts = read.replace(/\^\([^()]*\)|_\([^()]*\)|\^[-−.,']|_[-−.,']/g, '');
+  const noPunct = (t: string) => t.replace(/(?<=\d)[.,'](?!\d)|^[.,']+|[.,']+$/g, '');
+  return [...new Set([noScripts, noPunct(read), noPunct(noScripts)])].filter((t) => t !== read);
+}
+
 /** Is `edited` a plausible correction of a line read as `read` (with these alternative readings)? */
 export function plausibleEdit(read: string, alternates: readonly string[], edited: string): boolean {
   const e = norm(edited);
   if (!e) return false;
   if ([read, ...alternates].some((r) => norm(r) === e)) return true;
+  // dropping a misread exponent or a stray dot, possibly together with look-alike fixes
+  if (withoutExtras(read).some((t) => norm(t) === e || plausibleEdit(t, [], edited))) return true;
   const r = [...norm(read)], w = [...e];
-  // a dropped or doubled stroke: one symbol more or less, with the rest lining up
+  // a dropped or doubled stroke: one symbol more or less, with the rest lining up. Only symbols that
+  // carry no value: a digit, a sign or a relation more or less changes the maths (x=-3 -> x=3)
   if (Math.abs(r.length - w.length) === 1) {
     const [long, short] = r.length > w.length ? [r, w] : [w, r];
     for (let k = 0; k < long.length; k++) {
+      if (!/^[.,'`()[\]{}^_|]$/.test(long[k])) continue;
       const cut = [...long.slice(0, k), ...long.slice(k + 1)];
       if (cut.every((c, i) => c === short[i])) return true;
     }
