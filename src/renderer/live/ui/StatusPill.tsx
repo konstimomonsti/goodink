@@ -40,7 +40,7 @@ export function StatusPill({ status, page, exam, patterns }: { status: LiveStatu
   const btn = useRef<HTMLButtonElement>(null);
   const mode = MODES.find((m) => m.id === live.mode)!;
   const state = live.mode === 'off' ? 'off' : page?.paused ? 'paused' : status.state;
-  const stateText = state === 'off' ? 'off' : state === 'paused' ? 'paused on this page' : state === 'checking' ? 'checking' : state === 'offline' ? 'offline, local check only' : state === 'error' ? 'had a problem' : 'ready';
+  const stateText = state === 'off' ? 'off' : state === 'paused' ? 'paused on this page' : state === 'checking' ? 'checking' : state === 'offline' ? 'offline, local check only' : state === 'busy' ? 'AI busy, retrying' : state === 'error' ? 'had a problem' : 'ready';
   return (
     <>
       <button

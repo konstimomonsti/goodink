@@ -50,7 +50,7 @@ export interface LiveStats {
   usd: number;
   /** blocks waiting to settle or being checked */
   pending: number;
-  state: 'idle' | 'checking' | 'offline' | 'error';
+  state: 'idle' | 'checking' | 'offline' | 'busy' | 'error';
   aiReady: boolean;
   /** an AI call has been running for more than 4 s */
   slow: boolean;
@@ -190,6 +190,8 @@ function assignments(lines: readonly LineRecognition[], into: Map<string, string
 }
 
 export class LiveEngine {
+  /** blocks whose cloud check failed because the AI was busy or unreachable: retries so far */
+  private aiRetries = new Map<string, { n: number; timer: ReturnType<typeof setTimeout> }>();
   private mode: LiveMode;
   /** null until the recogniser module has loaded (it pulls in the backend bridge) */
   private recog: RecogModule | null;
@@ -566,7 +568,7 @@ export class LiveEngine {
       usd: this.ai.meter.usd,
       pending: this.settle.size + this.inflight.size + this.queue.length,
       // rate limited or unreachable: the AI is paused, local checks go on
-      state: this.inflight.size || this.ai.inflight ? 'checking' : h === 'offline' || h === 'busy' ? 'offline' : h === 'auth' ? 'error' : 'idle',
+      state: this.inflight.size || this.ai.inflight ? 'checking' : h === 'offline' ? 'offline' : h === 'busy' ? 'busy' : h === 'auth' ? 'error' : 'idle',
       aiReady: this.ai.ready(),
       slow,
       exam: this.exam,
@@ -578,6 +580,7 @@ export class LiveEngine {
     this.unsub();
     this.unsubAi();
     for (const t of this.regroupTimers.values()) clearTimeout(t);
+    for (const r of this.aiRetries.values()) clearTimeout(r.timer);
     if (this.holdTimer) clearTimeout(this.holdTimer);
     for (const id of [...this.settle.keys(), ...this.inflight.keys()]) this.cancel(id);
     this.idleCancel?.();
@@ -911,14 +914,19 @@ export class LiveEngine {
       const merged = out ? mergeCheck({ blockId, pageId, recognition: this.withAiReadings(rec, out), local, ai: out, ms, via: out.cached ? 'cache' : 'ai' }) : { ...first, ms };
       this.publish(pageId, block, merged, rec, true, key, out ? this.evaluate(pageId, block, rec, out) : results);
       this.lastMs = ms;
+      this.aiRetries.delete(blockId);
       this.resolve(blockId, merged);
     } catch (e) {
       if (!ctrl.signal.aborted) {
-        // offline, rate limited, no provider: the local verdict stands (not cached, so the
-        // block gets its AI check after the next change once the provider is back)
+        // offline or rate limited: the local verdict stands for now, and the block is tried again
+        // shortly (the cloud handles what this PC was unsure of, once it can); no provider at all or
+        // a rejected key wait for the user
         this.publish(pageId, block, first, rec, false, undefined, results);
         this.lastMs = Math.round(localMs);
         this.resolve(blockId, first);
+        const kind = e instanceof Error && e.name === 'NoAiProvider' ? (this.ai.health === 'none' ? 'none' : 'busy') : aiFailure(e);
+        // refused by the breaker (no request made): wait for it to reopen without using up a retry
+        if (kind === 'busy' || kind === 'offline') this.retryAiLater(pageId, blockId, e instanceof Error && e.name === 'NoAiProvider');
       } else this.resolve(blockId, null);
       // offline and busy are expected (the status pill shows them); anything else is worth a note
       if (!ctrl.signal.aborted && !(e instanceof Error && e.name === 'NoAiProvider') && !['offline', 'busy', 'abort'].includes(aiFailure(e))) console.warn('live: AI check failed', e);
@@ -926,6 +934,19 @@ export class LiveEngine {
       if (this.inflight.get(blockId)?.ctrl === ctrl) this.inflight.delete(blockId);
       this.emit({ type: 'stats' });
     }
+  }
+
+  /** Try a block's cloud check again after a wait (15 s, 45 s, 2 min), while it is unchanged. */
+  private retryAiLater(pageId: string, blockId: string, refused = false) {
+    const prev = this.aiRetries.get(blockId);
+    const n = prev ? prev.n + (refused ? 0 : 1) : 0;
+    if (prev) clearTimeout(prev.timer);
+    if (n >= POLICY.retryAiMs.length) return void this.aiRetries.delete(blockId);
+    const timer = setTimeout(() => {
+      if (this.disposed || !this.current(pageId, blockId) || (this.mode !== 'smart' && this.mode !== 'max')) return;
+      this.enqueue(pageId, blockId, true);
+    }, Math.max(POLICY.retryAiMs[n], this.ai.breaker.reopensIn() + 50));
+    this.aiRetries.set(blockId, { n, timer });
   }
 
   /** The AI's reading of a line it read differently from the local recogniser (shown in the card). */

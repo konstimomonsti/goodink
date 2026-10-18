@@ -440,6 +440,32 @@ test('the cloud gets the rest of the page as context (big context for complicate
   e.dispose();
 });
 
+test('a cloud check that failed because the AI was unreachable is tried again by itself', async () => {
+  const { POLICY } = await import('../../src/renderer/live/ai/policy.ts');
+  const saved = POLICY.retryAiMs, savedBreaker = { ...POLICY.breaker };
+  (POLICY as { retryAiMs: number[] }).retryAiMs = [60, 60, 60];
+  Object.assign(POLICY.breaker, { offlineMs: 100, busyMs: 100 });
+  let down = true;
+  try {
+    const { s, e, p } = setup('smart', (sys, user) => {
+      if (down) throw new Error('Could not reach the AI provider');
+      return standard(() => true)(sys, user);
+    });
+    s.add(write('2x+3=7', 0));
+    s.add(write('2x=4', 1));
+    await until(() => p.judges().length > 0);
+    const failed = p.judges().length;
+    await settle();
+    down = false; // the provider comes back; nothing on the page changes
+    await until(() => p.judges().length > failed, 3000);
+    assert.ok(p.judges().length > failed, 'the block was sent again without any new ink');
+    e.dispose();
+  } finally {
+    (POLICY as { retryAiMs: number[] }).retryAiMs = saved;
+    Object.assign(POLICY.breaker, savedBreaker);
+  }
+});
+
 test('mistake journal: confirmed errors are kept per notebook, grouped, and become flashcards', async () => {
   const kv = memKV();
   const { s, e } = setup('local', () => '', { kv });

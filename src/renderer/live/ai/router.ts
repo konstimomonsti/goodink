@@ -107,6 +107,13 @@ export class Breaker {
     this.s.delete(p);
   }
 
+  /** ms until the first paused provider may be tried again (0 when none is paused) */
+  reopensIn(): number {
+    let soonest = Infinity;
+    for (const st of this.s.values()) if (st.openUntil > this.now()) soonest = Math.min(soonest, st.openUntil - this.now());
+    return Number.isFinite(soonest) ? soonest : 0;
+  }
+
   /** why a provider is paused, if it is */
   reason(p: ProviderId): AiFailure | null {
     const st = this.s.get(p);

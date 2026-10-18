@@ -446,10 +446,26 @@ test('failover: a rate-limited provider is skipped and paused; the next ready on
   const out = await ai.judge('k', judgeIn({ line: recLine('b', 'a=1') }));
   assert.ok(out);
   const judges = calls.filter((c) => !isVerify(c.req));
-  assert.deepEqual(judges.map((c) => c.c.provider), ['google', 'anthropic']);
-  assert.equal(judges[1].c.model, 'claude-haiku-5-5');
-  assert.equal(judges[1].c.effort, '', 'no thinking for Claude judge calls');
+  // Google's limits are per model: its own model is tried once before failing over to Anthropic
+  assert.deepEqual(judges.map((c) => c.c.provider), ['google', 'google', 'anthropic']);
+  assert.equal(judges[2].c.model, 'claude-haiku-5-5');
+  assert.equal(judges[2].c.effort, '', 'no thinking for Claude judge calls');
   assert.equal(ai.breaker.allow('google' as never), false);
+});
+
+test('a rate-limited stronger model falls back to the user\'s own model, and stays there a while', async () => {
+  // a free Gemini key allows very few Pro calls: Pro answers 429, Flash works
+  const { fn, calls } = fakeComplete((c) => (/pro/.test(c.model) ? rateLimit() : { text: 'ok' }));
+  const ai = new S.LiveAi({ settings: () => settings(['google']), complete: fn, listModels: async () => ['gemini-3-pro', 'gemini-flash-latest'], kv: null });
+  const req = { system: 's', turns: [{ role: 'user' as const, text: 'x' }], maxTokens: 10 };
+  const r = await ai.call('strong', req);
+  assert.equal(r.text, 'ok');
+  assert.deepEqual(calls.map((c) => c.c.model), ['gemini-3-pro', 'gemini-flash-latest'], 'Pro first, then the own model at once');
+  assert.equal(ai.health, 'ok');
+  assert.equal(ai.breaker.allow('google' as never), true, 'the provider is not paused: it works');
+  await ai.call('strong', req);
+  assert.equal(calls[calls.length - 1].c.model, 'gemini-flash-latest', 'the next call goes straight to the own model');
+  assert.equal(calls.length, 3);
 });
 
 test('all providers down: a clear error, health reported, aborts propagate', async () => {

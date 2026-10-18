@@ -37,7 +37,7 @@ export interface JournalEntry {
 export interface LiveStatus {
   mode: LiveMode;
   /** idle: nothing running · checking: a check is in flight · offline: AI unreachable (local still works) */
-  state: 'idle' | 'checking' | 'offline' | 'error';
+  state: 'idle' | 'checking' | 'offline' | 'busy' | 'error';
   /** last check's end-to-end latency */
   lastMs: number | null;
   /** tokens used this session (input + output) */

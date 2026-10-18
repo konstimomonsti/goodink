@@ -65,6 +65,10 @@ export const POLICY = {
   /** Smart sends every formula line to the cloud model, not only the ones this PC is unsure of
    *  (owner, 2026-10-17). The CAS stays the instant first pass and the veto against false reds. */
   cloudChecksEveryFormula: true,
+  /** after the stronger model is rate-limited or missing, use the user's own model this long */
+  downgradeMs: 10 * 60_000,
+  /** lines that wanted the cloud while it was busy or unreachable are tried again after these waits */
+  retryAiMs: [15_000, 45_000, 120_000],
   /** ink older than this session is judged by AI only when the learner opens its card */
   aiOnlyForFreshInk: true,
   /** only the first error of a block is marked red; later ones are in the card */

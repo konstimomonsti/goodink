@@ -41,6 +41,8 @@ export class LiveAi {
   private cache: PersistentLru<Omit<JudgeResult, 'verify'>>;
   /** last call outcome, for the status pill */
   health: AiHealth = 'ok';
+  /** providers whose stronger model failed lately, until when (the user's own model is used meanwhile) */
+  private downgraded = new Map<ProviderId, number>();
   /** calls in flight */
   inflight = 0;
   private listeners = new Set<() => void>();
@@ -146,6 +148,10 @@ export class LiveAi {
     try {
       for (const p of order) {
         let c = await this.choice(ai, p, tier, opts.think);
+        const own = choiceFrom(ai, p).model;
+        // the stronger model was rate-limited or missing on this key lately (a free Gemini key allows
+        // very few Pro calls): use the user's own model for a while instead of failing every line
+        if (tier !== 'user' && own && own !== c.model && (this.downgraded.get(p) ?? 0) > Date.now()) c = { ...c, model: own };
         for (let attempt = 0; attempt < 2; attempt++) {
           try {
             const r = await fn(c);
@@ -157,9 +163,10 @@ export class LiveAi {
             if (kind === 'abort' || signal?.aborted || started()) throw e;
             last = e;
             lastKind = kind;
-            // the picked model is not available on this key: try the user's own model once
-            const own = choiceFrom(ai, p).model;
-            if (kind === 'model' && attempt === 0 && own && own !== c.model) {
+            // the picked model is busy or not available on this key: try the user's own model once,
+            // and keep to it for a while
+            if ((kind === 'model' || kind === 'busy') && attempt === 0 && own && own !== c.model) {
+              this.downgraded.set(p, Date.now() + POLICY.downgradeMs);
               c = { ...c, model: own };
               continue;
             }

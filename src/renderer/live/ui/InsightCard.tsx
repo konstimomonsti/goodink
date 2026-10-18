@@ -239,6 +239,11 @@ export function InsightCard({ vp, engine, status, initial, question, onClose, on
       </header>
 
       <div className="live-card-body" ref={body} onScroll={(e) => card.current?.classList.toggle('is-scrolled', e.currentTarget.scrollTop > 2)}>
+        {status.state === 'busy' && (
+          <p className="live-banner">
+            <WifiOff size={14} /> The AI is busy (rate limit). Checked on this PC for now; it tries again by itself.
+          </p>
+        )}
         {status.state === 'offline' && (
           <p className="live-banner">
             <WifiOff size={14} /> Offline: checked on this PC only.

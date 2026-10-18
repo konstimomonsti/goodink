@@ -1079,7 +1079,7 @@ html, body { touch-action: pan-x pan-y; }
 .live-pill-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--live-green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--live-green) 18%, transparent); }
 .live-pill.is-checking .live-pill-dot { background: var(--c-accent); box-shadow: none; animation: live-ping 1s ease-out infinite; }
 @keyframes live-ping { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c-accent) 50%, transparent); } to { box-shadow: 0 0 0 6px transparent; } }
-.live-pill.is-offline .live-pill-dot { background: var(--live-amber); box-shadow: 0 0 0 3px color-mix(in srgb, var(--live-amber) 18%, transparent); }
+.live-pill.is-offline .live-pill-dot, .live-pill.is-busy .live-pill-dot { background: var(--live-amber); box-shadow: 0 0 0 3px color-mix(in srgb, var(--live-amber) 18%, transparent); }
 .live-pill.is-error .live-pill-dot { background: var(--live-red); box-shadow: 0 0 0 3px color-mix(in srgb, var(--live-red) 18%, transparent); }
 .live-pill.is-off .live-pill-dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--c-border-input); }
 .live-pill.is-off .live-pill-mode { color: var(--c-text-muted); }
