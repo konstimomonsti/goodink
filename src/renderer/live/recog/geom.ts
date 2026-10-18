@@ -93,6 +93,41 @@ export function classify(inks: Ink[]): number {
   return unit;
 }
 
+/** Total turning of a stroke around its box centre, in radians (a closed loop is about 2π). */
+function winding(k: Ink): number {
+  const p = k.pts;
+  let total = 0, prev = NaN;
+  for (let i = 0; i < p.length; i += 3) {
+    const a = Math.atan2(p[i + 1] - k.cy, p[i] - k.cx);
+    if (!Number.isNaN(prev)) {
+      let d = a - prev;
+      if (d > Math.PI) d -= 2 * Math.PI;
+      else if (d < -Math.PI) d += 2 * Math.PI;
+      total += d;
+    }
+    prev = a;
+  }
+  return Math.abs(total);
+}
+
+/**
+ * A loop drawn around other ink: circling a result, or the "ask about this" gesture. It is not
+ * writing, and treated as writing it glues the lines it touches together (a circle passed for a Σ
+ * whose "limits" were the line above). It goes most of the way round its centre (a √ or ∫ does
+ * not) and encloses the centre of other ink.
+ */
+export function enclosingLoops(inks: readonly Ink[], unit: number): Set<Ink> {
+  const loops = new Set<Ink>();
+  for (const k of inks) {
+    if (k.w < unit * 2.2 || k.h < unit * 1.4) continue;
+    if (winding(k) < Math.PI * 1.65) continue;
+    let inside = 0;
+    for (const o of inks) if (o !== k && o.cx > k.x0 && o.cx < k.x1 && o.cy > k.y0 && o.cy < k.y1 && o.w < k.w && o.h < k.h) inside++;
+    if (inside >= 1) loops.add(k);
+  }
+  return loops;
+}
+
 /** Smallest distance between two strokes' points, cut short once below `limit`. */
 function inkDist(a: Ink, b: Ink, limit: number): number {
   const p = a.pts, q = b.pts;
@@ -238,6 +273,15 @@ export function symbols(inks: Ink[], unit: number, keepApart: ReadonlySet<Ink> =
       if (keepApart.size && keepApart.has(b)) continue;
       const xo = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
       const yGap = Math.max(a.y0, b.y0) - Math.min(a.y1, b.y1); // < 0: overlapping
+      // "=" written small or quick: two short dashes, wider than tall, one over the other. They can
+      // fall below the flat-bar size or curve a little; two round dots (":") are not dashes
+      const dash = (k: Ink) => k.w >= Math.max(k.h * 1.3, unit * 0.1) && k.h < unit * 0.4 && k.w < unit * 1.6;
+      if (dash(a) && dash(b) && !(a.flat && b.flat)) {
+        if (xo > Math.min(a.w, b.w) * 0.4 && yGap > -unit * 0.05 && yGap < unit * 0.6) {
+          union(parent, i, j);
+          continue;
+        }
+      }
       if (a.flat && b.flat) {
         // "=": two bars over each other, close
         if (xo > Math.min(a.w, b.w) * 0.55 && yGap < unit * 0.6 && yGap > 0) union(parent, i, j);
@@ -375,6 +419,23 @@ function compound(units: Unit[], unitH: number) {
     if (!members.length) continue;
     for (const j of members) union(parent, i, j);
   }
+  /** Does v's own row of glyphs (same level, close together) reach far past big on either side? */
+  const overhangs = (v: Unit, big: Unit) => {
+    let x0 = v.x0, x1 = v.x1;
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const u of units) {
+        if (Math.abs(u.cy - v.cy) > unitH * 0.45 || u.x1 < x0 - unitH * 2 || u.x0 > x1 + unitH * 2) continue;
+        if (u.x0 < x0 || u.x1 > x1) {
+          x0 = Math.min(x0, u.x0);
+          x1 = Math.max(x1, u.x1);
+          grew = true;
+        }
+      }
+    }
+    const allow = Math.max(w(big), unitH * 2.5);
+    return big.x0 - x0 > allow || x1 - big.x1 > allow;
+  };
   const limits: number[] = [];
   for (let i = 0; i < n; i++) {
     const big = units[i];
@@ -392,7 +453,10 @@ function compound(units: Unit[], unitH: number) {
       if (xo < w(v) * 0.5 && !(isBig && vc > big.x0 - unitH * 0.3 && vc < big.x1 + unitH * 0.3)) continue;
       const above = big.y0 - v.y1, below = v.y0 - big.y1;
       const accent = (v.ink.every((k) => k.flat || k.dot) || Math.max(w(v), h(v)) < unitH * 0.6) && above > -unitH * 0.1 && above < unitH * 0.45;
-      const limit = isBig && h(v) < h(big) * 0.8 && ((above > -unitH * 0.1 && above < unitH) || (below > -unitH * 0.1 && below < unitH));
+      // a limit is about as wide as its operator (k=1 under Σ, x→0 under lim); the end of a whole
+      // line that happens to sit under a tall digit ("2" of "x = 2" under the "6" of "3x = 6") is not
+      const near = (above > -unitH * 0.1 && above < unitH) || (below > -unitH * 0.1 && below < unitH);
+      const limit = isBig && h(v) < h(big) * 0.8 && near && !overhangs(v, big);
       if (limit) limits.push(j);
       if (accent || limit) {
         union(parent, i, j);
@@ -446,6 +510,11 @@ export function groupStrokes(pageId: string, strokes: readonly Stroke[]): InkBlo
   }
   if (!inks.length) return [];
   const unitH = classify(inks);
+  // not writing: loops drawn around other ink, and lone taps far from everything
+  const loops = enclosingLoops(inks, unitH);
+  const near = (k: Ink, r: number) => inks.some((o) => o !== k && !loops.has(o) && o.x0 < k.x1 + r && o.x1 > k.x0 - r && o.y0 < k.y1 + r && o.y1 > k.y0 - r);
+  for (let i = inks.length - 1; i >= 0; i--) if (loops.has(inks[i]) || (inks[i].dot && !near(inks[i], unitH * 4))) inks.splice(i, 1);
+  if (!inks.length) return [];
 
   // units: fractions (bar + numerator + denominator) and glyphs
   const fracs = findFractions(inks, unitH);
@@ -460,6 +529,21 @@ export function groupStrokes(pageId: string, strokes: readonly Stroke[]): InkBlo
   units.sort((a, b) => a.x0 - b.x0);
   compound(units, unitH);
 
+  // bands: a clear strip of empty space across the page is a line boundary that no row may cross
+  // (fractions, limits and matrices are single units by now, so they never span a strip). Lines
+  // written close together then stay apart even when one is written smaller than the rest
+  const band = new Map<Unit, number>();
+  {
+    const byTop = [...units].sort((a, b) => a.y0 - b.y0);
+    let b = -1, end = -Infinity;
+    for (const u of byTop) {
+      if (u.y0 > end + unitH * 0.12) b++;
+      end = Math.max(end, u.y1);
+      band.set(u, b);
+    }
+  }
+  const bandOf = (r: Row) => band.get(r.units[0]) ?? -1;
+
   // chain units into rows: each joins the open row whose midline is closest, if near enough
   const rows: Row[] = [];
   const maxRowGap = unitH * 3.2;
@@ -472,7 +556,7 @@ export function groupStrokes(pageId: string, strokes: readonly Stroke[]): InkBlo
     let best: Row | null = null, bestCost = Infinity;
     for (const r of rows) {
       const gap = u.x0 - r.x1;
-      if (gap > maxRowGap) continue;
+      if (gap > maxRowGap || bandOf(r) !== band.get(u)) continue;
       const dy = Math.abs(u.cy - r.mid);
       const tol = u.small ? unitH * 1.05 : unitH * 0.72;
       if (dy > tol) continue;
@@ -514,9 +598,14 @@ export function groupStrokes(pageId: string, strokes: readonly Stroke[]): InkBlo
   for (let i = rows.length - 1; i >= 0; i--) {
     const r = rows[i];
     if (r.units.length > 4 || !r.units.every((u) => u.small || Math.max(u.x1 - u.x0, u.y1 - u.y0) < unitH * 1.4)) continue;
+    // an equation of its own ("x = 2" written small under "3x = 6") is a line, never a satellite
+    if (r.units.some((u) => u.ink.length === 2 && u.ink.every((k) => k.flat))) continue;
     let best = -1, bestD = Infinity;
     rows.forEach((o, j) => {
       if (j === i || o.units.length <= r.units.length) return;
+      // a superscript or subscript sits at the side of its base, not under or over the whole row
+      const overlap = Math.min(o.x1, r.x1) - Math.max(o.x0, r.x0);
+      if (bandOf(o) !== bandOf(r) && overlap > (r.x1 - r.x0) * 0.5) return;
       const gap = Math.max(o.x0 - r.x1, r.x0 - o.x1);
       const dy = Math.abs(o.mid - median(r.units.map((u) => u.cy)));
       if (gap < unitH * 0.8 && dy < unitH * 1.25 && dy < bestD) [best, bestD] = [j, dy];
@@ -540,8 +629,16 @@ export function groupStrokes(pageId: string, strokes: readonly Stroke[]): InkBlo
   lines.sort((a, b) => a.bbox[1] - b.bbox[1] || a.bbox[0] - b.bbox[0]);
   const n = lines.length;
   const parent = new Int32Array(n).map((_, i) => i);
-  // a blank line's worth of space starts a new block; line spacing scales with the writing size
-  const maxGap = Math.max(unitH * 2.6, median(lines.map((l) => l.bbox[3] - l.bbox[1])) * 2);
+  // a blank line's worth of space starts a new block. With a few lines to go by, "blank" is judged
+  // against this writer's own line spacing (a separate problem 17 units above steps 2–7 units apart);
+  // otherwise against the writing size
+  const gaps: number[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const g = lines[i].bbox[1] - lines[i - 1].bbox[3];
+    if (g > -unitH * 0.6) gaps.push(Math.max(0, g));
+  }
+  const fixedGap = Math.max(unitH * 2.6, median(lines.map((l) => l.bbox[3] - l.bbox[1])) * 2);
+  const maxGap = gaps.length >= 3 ? Math.min(fixedGap, Math.max(unitH * 1.2, median(gaps) * 2.2)) : fixedGap;
   for (let i = 0; i < n; i++) {
     const a = lines[i].bbox;
     for (let j = i + 1; j < n; j++) {
