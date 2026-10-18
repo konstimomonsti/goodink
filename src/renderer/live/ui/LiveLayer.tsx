@@ -16,6 +16,8 @@ import { StatusPill, setLive, useLive } from './StatusPill';
 import { InsightCard } from './InsightCard';
 import { AiCard } from './AiCard';
 import { VoiceAsk } from './VoiceAsk';
+import { CircleAsk } from './CircleAsk';
+import { classify, enclosingLoops, inkOf } from '../recog/geom';
 import { MarkGate } from './markGate';
 import { PatternsDialog, loadJournal, saveJournal } from './Patterns';
 import { LIVE_TUNING as T } from './tuning';
@@ -40,6 +42,8 @@ export default function LiveLayer({ vp, s, slot, bridge, pageId }: { vp: Viewpor
   // the question a card was opened with by voice (answered as soon as it opens)
   const [cardQ, setCardQ] = useState<string | undefined>();
   const [ai, setAi] = useState<AiCardState[]>([]);
+  // a loop just drawn with the pen around ink: offer to ask about it
+  const [loop, setLoop] = useState<{ pageId: string; bbox: BBox; pts: number[] } | null>(null);
   const [patterns, setPatterns] = useState(false);
   const [journal, setJournal] = useState<JournalEntry[]>(() => loadJournal(s.id));
   const [announce, setAnnounce] = useState('');
@@ -181,6 +185,8 @@ export default function LiveLayer({ vp, s, slot, bridge, pageId }: { vp: Viewpor
       });
     };
     bridge.current.onPenActivity = (pid, x, y, down) => {
+      if (down) setLoop(null);
+      else circledAt(pid);
       gate.penActivity(pid, x, y, down);
       lastPen.current = performance.now();
       engineRef.current?.notePenActivity?.(pid, x, y, down);
@@ -193,6 +199,31 @@ export default function LiveLayer({ vp, s, slot, bridge, pageId }: { vp: Viewpor
       bridge.current.onPenActivity = undefined;
     };
   });
+
+  /** Was the stroke just finished a loop around ink? Only nearby strokes are looked at (cheap). */
+  const circledAt = (pid: string) => {
+    if (liveRef.current.mode === 'off') return;
+    const c = s.content(pid);
+    const last = c?.strokes[c.strokes.length - 1];
+    if (!c || !last || last.kind !== 'pen' || last.shape || last.pts.length < 3 * 24) return;
+    const [x0, y0, x1, y1] = last.bbox;
+    const near = c.strokes.filter((k) => k.kind === 'pen' && !k.shape && k.bbox[0] < x1 && k.bbox[2] > x0 && k.bbox[1] < y1 && k.bbox[3] > y0);
+    if (near.length < 2) return;
+    const inks = near.map((k) => inkOf(k));
+    const unit = classify(inks);
+    const mine = inks[near.indexOf(last)];
+    if (!enclosingLoops(inks, unit).has(mine)) return;
+    const pts: number[] = [];
+    for (let i = 0; i < last.pts.length; i += 3) pts.push(last.pts[i], last.pts[i + 1]);
+    setLoop({ pageId: pid, bbox: last.bbox, pts });
+  };
+  const askLoop = () => {
+    if (!loop) return;
+    const region = { pageId: loop.pageId, pts: loop.pts, bbox: loop.bbox };
+    setLoop(null);
+    setAi((list) => [...list.filter((c) => c.pinned), { id: uid(), region, pinned: false }]);
+  };
+  const dismissLoop = useCallback(() => setLoop(null), []);
 
   // ---- pause, exam ----
   const setPaused = (pid: string, paused: boolean) => {
@@ -342,6 +373,7 @@ export default function LiveLayer({ vp, s, slot, bridge, pageId }: { vp: Viewpor
               setRing(t ? t.pageId : null, t?.block.bbox);
             }} />, document.body, c.id),
         )}
+      {loop && createPortal(<CircleAsk vp={vp} pageId={loop.pageId} bbox={loop.bbox} onAsk={askLoop} onDismiss={dismissLoop} />, document.body)}
       {patterns && <PatternsDialog entries={allJournal} engine={engine} onClose={() => setPatterns(false)} />}
       {createPortal(
         <div className="sr-only" role="status" aria-live="polite">

@@ -1166,3 +1166,11 @@ html, body { touch-action: pan-x pan-y; }
 @media (prefers-reduced-motion: reduce) { .live-voice-btn.is-on { animation: none; } }
 
 .live-edit-note { margin: 6px 2px 0; font: 400 12px/16px var(--font-sans); color: var(--live-amber-text, #8a5300); }
+
+/* ---- Circle to ask (a pen loop around ink offers the AI) ---- */
+.live-circle-ask { position: fixed; z-index: 60; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px 0 10px; border-radius: var(--r-pill); border: 1px solid var(--c-border); background: var(--c-surface); box-shadow: var(--sh-pop); font: 600 13px/1 var(--font-sans); color: var(--c-text); white-space: nowrap; animation: live-circle-in 160ms ease-out; }
+.live-circle-ask svg { color: var(--c-accent); }
+.live-circle-ask:hover { background: var(--c-surface-2); }
+.live-circle-ask:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
+@keyframes live-circle-in { from { opacity: 0; transform: translateY(2px) scale(0.98); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .live-circle-ask { animation: none; } }

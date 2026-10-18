@@ -37,7 +37,7 @@ const TOOLS: { id: Tool; label: string; key: string; icon: ReactNode }[] = [
   { id: 'image', label: 'Image', key: 'I', icon: <ImagePlus size={19} /> },
   { id: 'tape', label: 'Tape', key: 'U', icon: <Bandage size={19} /> },
   { id: 'laser', label: 'Laser pointer', key: 'K', icon: <Pointer size={19} /> },
-  { id: 'ai', label: 'AI selector', key: 'A', icon: <Sparkles size={19} /> },
+  { id: 'ai', label: 'Circle and ask AI', key: 'A', icon: <Sparkles size={19} /> },
 ];
 
 const TAPE_COLORS = ['#7d9cff', '#5ad08f', '#ffb44a', '#ff8fb1', '#a0a0ab'];

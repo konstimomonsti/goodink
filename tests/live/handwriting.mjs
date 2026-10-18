@@ -366,6 +366,37 @@ export async function writeText(win, text, opts = {}) {
   return { strokes: strokes.length, bbox: b, marks: strokes.map((s) => s.mark) };
 }
 
+/** Draws one pen stroke through page-space points [[x, y], ...] with real pointer events. */
+export async function drawPath(win, pts, pressure = 0.5) {
+  const o = await pageOrigin(win);
+  const client = pts.map(([x, y]) => [o.left + (x - o.ox) * o.zoom, o.top + (y - o.oy) * o.zoom]);
+  await win.evaluate(async ([s, p]) => {
+    const sc = document.querySelector('.gi-scroller');
+    const fire = (type, x, y, buttons, pr) =>
+      sc.dispatchEvent(new PointerEvent(type, { pointerId: 2, pointerType: 'pen', clientX: x, clientY: y, buttons, button: type === 'pointermove' ? -1 : 0, pressure: pr, bubbles: true, cancelable: true, isPrimary: true }));
+    fire('pointermove', s[0][0], s[0][1], 0, 0);
+    fire('pointerdown', s[0][0], s[0][1], 1, p);
+    for (let i = 1; i < s.length; i++) {
+      fire('pointerrawupdate', s[i][0], s[i][1], 1, p);
+      fire('pointermove', s[i][0], s[i][1], 1, p);
+    }
+    fire('pointerup', s[s.length - 1][0], s[s.length - 1][1], 0, 0);
+    await new Promise((r) => requestAnimationFrame(() => r()));
+  }, [client, pressure]);
+}
+
+/** A hand-drawn loop around a page box, overshooting into a short tail like a real circle. */
+export function loopAround([x0, y0, x1, y1], pad = 8, seed = 1) {
+  const r = rng(seed);
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, rx = (x1 - x0) / 2 + pad, ry = (y1 - y0) / 2 + pad;
+  const out = [];
+  for (let a = 200; a <= 200 + 380; a += 6) {
+    const t = (a * Math.PI) / 180, w = 1 + (r() - 0.5) * 0.06;
+    out.push([cx + rx * w * Math.cos(t), cy + ry * w * Math.sin(t)]);
+  }
+  return out;
+}
+
 /** The current page's strokes as plain data ({ id, kind, pts: number[], bbox }). */
 export async function pageStrokes(win) {
   return win.evaluate(async () => {
