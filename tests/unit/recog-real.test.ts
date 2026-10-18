@@ -5,7 +5,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { registerHooks } from 'node:module';
 import { groupStrokes } from '../../src/renderer/live/recog/geom.ts';
+
+// the app's modules import each other without extensions (Vite style); resolve those to .ts here
+registerHooks({
+  resolve(spec, ctx, next) {
+    try {
+      return next(spec, ctx);
+    } catch (e) {
+      if (/^\.\.?\//.test(spec) && ctx.parentURL?.endsWith('.ts'))
+        for (const ext of ['.ts', '/index.ts'])
+          try {
+            return next(spec + ext, ctx);
+          } catch {
+            /* next */
+          }
+      throw e;
+    }
+  },
+});
 import type { Stroke } from '../../src/renderer/live/contract.ts';
 
 function load(name: string): Stroke[] {
@@ -28,4 +47,15 @@ test('real ink: a circled answer, wide gaps and tiny "=" signs group into the ri
   const circle = strokes.reduce((a, s) => (s.pts.length > a.pts.length ? s : a));
   assert.ok(!used.has(circle.id), 'the circle around x=2 is not part of any line');
   assert.equal(used.size, strokes.length - 2, 'everything else is used, once');
+});
+
+test('impossible readings are repaired with handwriting look-alikes, a digit before a new letter', async () => {
+  const { repairs } = await import('../../src/renderer/live/recog/read.ts');
+  assert.equal(repairs('3x+<=8')[0]?.text, '3x+2=8', 'the 2 the recogniser read as "<"');
+  assert.equal(repairs('}x=6')[0]?.text, '3x=6', 'the 3 read as "}"');
+  // one swap gives a valid reading with f as a variable; the all-digit reading needs two
+  const r = repairs('3x+<=f').map((x) => x.text);
+  assert.equal(r[0], '3x+2=f');
+  assert.ok(r.includes('3x+2=8'), 'the all-digit reading is offered too');
+  assert.deepEqual(repairs('((('), [], 'nothing valid nearby: no repair');
 });

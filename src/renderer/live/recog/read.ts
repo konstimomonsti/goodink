@@ -4,6 +4,7 @@
 import type { BBox, InkToken, LineRecognition } from '../contract';
 import { symOf, type Sym } from './geom';
 import { runsOf, type Layout, type Run } from './layout';
+import { parseVariants } from '../math';
 
 /** One recognised word of a run: its ranked readings and the strokes it covers. */
 export interface WordIn {
@@ -514,6 +515,35 @@ export function lineKind(layout: Layout, words: WordIn[]): 'math' | 'text' {
   return mathChars > 0 || letters <= 2 ? 'math' : 'text';
 }
 
+/**
+ * Handwriting look-alikes a line that is impossible as maths may be repaired with: what the
+ * recogniser said -> what was probably written ("3x+<=8" was "3x+2=8", "}x=6" was "3x=6").
+ */
+const REPAIR: Record<string, string> = {
+  '<': '2z', '>': '72', '}': '3', ']': '31', '{': '(', '[': '(', z: '2', Z: '2', S: '5', s: '5', l: '1', I: '1', '|': '1',
+  O: '0', o: '0', D: '0', b: '6', g: '9', q: '9', t: '+', T: '7', '?': '27', B: '83', $: '5', f: '8', J: '3', y: '4',
+};
+
+/** Valid-maths readings within two look-alike swaps of an impossible one, fewest swaps first. */
+export function repairs(text: string): { text: string; swaps: number; at: number[] }[] {
+  const pos = [...text].flatMap((c, i) => (REPAIR[c] ? [[i, REPAIR[c]] as const] : []));
+  const out: { text: string; swaps: number; at: number[] }[] = [];
+  const seen = new Set<string>();
+  const put = (i: number, c: string, t: string) => t.slice(0, i) + c + t.slice(i + 1);
+  const tryText = (t: string, at: number[]) => {
+    if (seen.has(t)) return;
+    seen.add(t);
+    if (parseVariants(t).length) out.push({ text: t, swaps: at.length, at });
+  };
+  for (const [i, r] of pos) for (const c of r) tryText(put(i, c, text), [i]);
+  if (pos.length <= 10)
+    for (let a = 0; a < pos.length; a++)
+      for (let b = a + 1; b < pos.length; b++) for (const ca of pos[a][1]) for (const cb of pos[b][1]) tryText(put(pos[b][0], cb, put(pos[a][0], ca, text)), [pos[a][0], pos[b][0]]);
+  // fewest swaps first; then a digit over a new letter variable (after "+" or "=", "2" beats "z")
+  const letters = (f: { text: string; at: number[] }) => f.at.filter((i) => /[a-zA-Z]/.test(f.text[i])).length;
+  return out.sort((x, y) => x.swaps - y.swaps || letters(x) - letters(y)).slice(0, 3);
+}
+
 /** line alternates kept (the CAS checks every one with p >= 0.1) and their cost temperature */
 const ALT_MAX = 5;
 const ALT_TEMP = 0.5;
@@ -618,17 +648,39 @@ export function readLine(lineId: string, layout: Layout, runWords: WordIn[][]): 
     const total = probs.reduce((a, b) => a + b, 0);
     if (total > 1 - confidence) probs = probs.map((p) => (p * (1 - confidence)) / total);
   }
+  let alternates = ranked.map(([t]) => t);
+  let alternateLatex = ranked.map(([t]) => altLatex.get(t) ?? '');
+  let text = out.text, lineLatex = latex, tokens = out.tokens;
+  // impossible as maths ("3x+<=8", "}x=6"): a reading one or two look-alike swaps away that is
+  // valid becomes the reading, never trusted enough for a local red; the original stays an alternate
+  if (letters && !parseVariants(text).length) {
+    const fixes = repairs(text);
+    if (fixes.length) {
+      const best = fixes[0];
+      const newLetters = (f: { text: string; at: number[] }) => f.at.filter((i) => /[a-zA-Z]/.test(f.text[i])).length;
+      const tied = fixes.filter((f) => f.swaps === best.swaps && newLetters(f) === newLetters(best)).length;
+      confidence = (best.swaps === 1 ? 0.6 : 0.45) / tied;
+      const others = [...fixes.slice(1).map((f) => f.text), text, ...alternates].filter((t, i, a) => t !== best.text && a.indexOf(t) === i).slice(0, ALT_MAX);
+      const share = (1 - confidence) * 0.6;
+      probs = others.map((t, i) => (i < fixes.length - 1 ? share / Math.max(1, fixes.length - 1) : 0.03));
+      alternateLatex = others.map((t) => latexOf(t));
+      alternates = others;
+      tokens = out.tokens.map((k) => (best.at.some((i) => i >= k.span[0] && i < k.span[1]) ? { ...k, text: best.text.slice(k.span[0], k.span[1]) } : k));
+      text = best.text;
+      lineLatex = latexOf(best.text);
+    } else confidence = Math.min(confidence, 0.3);
+  }
   const alternateProbs = probs.map((p) => Math.round(p * 1000) / 1000);
   return {
     lineId,
     kind: 'math',
-    text: out.text,
-    latex,
+    text,
+    latex: lineLatex,
     confidence: Math.round(confidence * 1000) / 1000,
-    alternates: ranked.map(([t]) => t),
+    alternates,
     alternateProbs,
-    alternateLatex: ranked.map(([t]) => altLatex.get(t) ?? ''),
-    tokens: out.tokens,
+    alternateLatex,
+    tokens,
     source: 'local-ink',
   };
 }
