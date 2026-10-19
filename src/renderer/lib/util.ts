@@ -47,4 +47,6 @@ export async function canvasToPng(c: HTMLCanvasElement | OffscreenCanvas): Promi
 }
 
 export const isMac = false;
-export const modKey = (e: { ctrlKey: boolean; metaKey: boolean }) => e.ctrlKey || e.metaKey;
+/** Running in the Android app (no window to minimise, the system draws the bars). */
+export const isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
+export const modKey =(e: { ctrlKey: boolean; metaKey: boolean }) => e.ctrlKey || e.metaKey;

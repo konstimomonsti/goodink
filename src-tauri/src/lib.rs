@@ -48,8 +48,23 @@ fn profile_dir() -> PathBuf {
     if let Ok(p) = std::env::var("GOODINK_PROFILE") {
         return PathBuf::from(p);
     }
+    #[cfg(target_os = "android")]
+    return android_files_dir();
+    #[allow(unreachable_code)]
     let base = std::env::var("APPDATA").map(PathBuf::from).unwrap_or_else(|_| std::env::temp_dir());
     base.join("goodink")
+}
+
+/// Android: the app's private files folder, /data/user/0/<package>/files. Known before Tauri starts
+/// (the store opens first), so it comes from the process name, which Android sets to the package.
+#[cfg(target_os = "android")]
+fn android_files_dir() -> PathBuf {
+    let pkg = fs::read("/proc/self/cmdline")
+        .ok()
+        .map(|b| String::from_utf8_lossy(b.split(|c| *c == 0).next().unwrap_or_default()).split(':').next().unwrap_or_default().to_string())
+        .filter(|p| !p.is_empty() && !p.contains('/'))
+        .unwrap_or_else(|| "app.goodink.notes".into());
+    PathBuf::from(format!("/data/user/0/{pkg}/files"))
 }
 
 fn config_file() -> PathBuf {
@@ -756,10 +771,18 @@ fn web_label(label: &str, prefix: &str) -> Res<()> {
 #[tauri::command]
 async fn web_preview_create(app: AppHandle, label: String, url: String, x: f64, y: f64, width: f64, height: f64) -> Res<()> {
     web_label(&label, "preview-")?;
-    let win = app.get_window("main").ok_or("no main window")?;
-    let b = tauri::webview::WebviewBuilder::new(&label, WebviewUrl::External(web_url(&url)?)).additional_browser_args(&browser_args()).focused(false);
-    win.add_child(b, tauri::LogicalPosition::new(x, y), tauri::LogicalSize::new(width.max(1.0), height.max(1.0))).map_err(|e| e.to_string())?;
-    Ok(())
+    #[cfg(desktop)]
+    {
+        let win = app.get_window("main").ok_or("no main window")?;
+        let b = tauri::webview::WebviewBuilder::new(&label, WebviewUrl::External(web_url(&url)?)).additional_browser_args(&browser_args()).focused(false);
+        win.add_child(b, tauri::LogicalPosition::new(x, y), tauri::LogicalSize::new(width.max(1.0), height.max(1.0))).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(mobile)]
+    {
+        let _ = (app, url, x, y, width, height);
+        Err("web previews are not available on this device".into())
+    }
 }
 
 /// The presentation window (a notebook page on another screen), with the main window's switches.
@@ -769,17 +792,25 @@ async fn present_open(app: AppHandle, x: Option<f64>, y: Option<f64>, width: f64
         let _ = w.set_focus();
         return Ok(());
     }
-    let mut b = WebviewWindowBuilder::new(&app, "present", WebviewUrl::App("index.html#present".into()))
-        .title("goodink — Presentation")
-        .inner_size(width, height)
-        .fullscreen(fullscreen)
-        .background_color(tauri::window::Color(0, 0, 0, 0xff))
-        .additional_browser_args(&browser_args());
-    if let (Some(x), Some(y)) = (x, y) {
-        b = b.position(x, y);
+    #[cfg(desktop)]
+    {
+        let mut b = WebviewWindowBuilder::new(&app, "present", WebviewUrl::App("index.html#present".into()))
+            .title("goodink — Presentation")
+            .inner_size(width, height)
+            .fullscreen(fullscreen)
+            .background_color(tauri::window::Color(0, 0, 0, 0xff))
+            .additional_browser_args(&browser_args());
+        if let (Some(x), Some(y)) = (x, y) {
+            b = b.position(x, y);
+        }
+        b.build().map_err(|e| e.to_string())?;
+        Ok(())
     }
-    b.build().map_err(|e| e.to_string())?;
-    Ok(())
+    #[cfg(mobile)]
+    {
+        let _ = (x, y, width, height, fullscreen);
+        Err("presenting on another screen is not available on this device".into())
+    }
 }
 
 /// A web page in a goodink window of its own.
@@ -790,14 +821,24 @@ async fn web_window_open(app: AppHandle, label: String, url: String, title: Stri
         let _ = w.set_focus();
         return Ok(());
     }
-    WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(web_url(&url)?))
-        .title(format!("{title} — goodink"))
-        .inner_size(1200.0, 860.0)
-        .center()
-        .additional_browser_args(&browser_args())
-        .build()
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    #[cfg(desktop)]
+    {
+        WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(web_url(&url)?))
+            .title(format!("{title} — goodink"))
+            .inner_size(1200.0, 860.0)
+            .center()
+            .additional_browser_args(&browser_args())
+            .build()
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(mobile)]
+    {
+        // Android: hand the page to the system browser
+        let _ = title;
+        use tauri_plugin_opener::OpenerExt;
+        app.opener().open_url(web_url(&url)?.as_str(), None::<&str>).map_err(|e| e.to_string())
+    }
 }
 
 /// Chromium switches for WebView2. Overriding the defaults means restating Tauri's own ones.
@@ -818,8 +859,16 @@ fn browser_args() -> String {
     a
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     T_MAIN.store(now_ms(), Ordering::Relaxed);
+    #[cfg(target_os = "android")]
+    {
+        // /data/local/tmp (std's default) is not writable for apps
+        let tmp = android_files_dir().with_file_name("cache");
+        let _ = fs::create_dir_all(&tmp);
+        std::env::set_var("TMPDIR", tmp);
+    }
     let test = is_test();
     let store = match Store::new(library_root()) {
         Ok(s) => s,
@@ -830,7 +879,9 @@ pub fn run() {
     };
     let initial_files = files_from_args(&std::env::args().collect::<Vec<_>>());
 
+    #[allow(unused_mut)]
     let mut builder = tauri::Builder::default();
+    #[cfg(desktop)]
     if !test {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             let files = files_from_args(&args);
@@ -868,6 +919,13 @@ pub fn run() {
             let url = if test { "index.html?test=1" } else { "index.html" };
             let (theme, dark) = startup_theme(&app.state::<AppState>().store());
             let bg = if dark { tauri::window::Color(0x12, 0x12, 0x14, 0xff) } else { tauri::window::Color(0xf2, 0xf2, 0xf5, 0xff) };
+            #[cfg(mobile)]
+            {
+                let _ = (test, theme);
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::App(url.into())).background_color(bg).build()?;
+            }
+            #[cfg(desktop)]
+            {
             let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::App(url.into()))
                 .theme(theme)
                 .background_color(bg)
@@ -889,6 +947,7 @@ pub fn run() {
                 b = b.position(-6000.0, 0.0).focused(false);
             }
             let _win = b.build()?;
+            }
             T_BUILT.store(now_ms(), Ordering::Relaxed);
             Ok(())
         })

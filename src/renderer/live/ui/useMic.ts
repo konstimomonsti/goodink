@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/api';
 import { toast } from '../../lib/store';
+import { isAndroid } from '../../lib/util';
 import type { LiveUiEngine } from './engineApi';
 
 type Dictation = { stop(): Promise<string> };
@@ -88,7 +89,7 @@ export function useMic(engine: LiveUiEngine | null, onText: (text: string, final
     } catch {
       starting.current = false;
       setState('idle');
-      toast('No microphone available. Check microphone access in Windows privacy settings.', { kind: 'error', ms: 6000 });
+      toast(isAndroid ? 'No microphone available. Allow goodink to use the microphone in Android settings.' : 'No microphone available. Check microphone access in Windows privacy settings.', { kind: 'error', ms: 6000 });
       return;
     }
     const ctx = new AudioContext();

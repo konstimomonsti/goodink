@@ -3,7 +3,7 @@ import { BookOpen, X, Plus, PenTool, FileUp, Search as SearchIcon, Minus, Square
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useApp, activateTab, closeTab, closeDialog, dismissToast, openDialog, quickNote, pickPdfs, openFiles, updateSettings } from './lib/store';
 import { api } from './lib/api';
-import { modKey } from './lib/util';
+import { isAndroid, modKey } from './lib/util';
 import { Library } from './library/Library';
 const Editor = lazy(() => import('./editor/Editor').then((m) => ({ default: m.Editor })));
 const LinkView = lazy(() => import('./library/LinkView').then((m) => ({ default: m.LinkView })));
@@ -151,8 +151,8 @@ export function App() {
             <Plus size={15} />
           </button>
         </div>
-        <div className="titlebar-drag" data-tauri-drag-region />
-        <WindowControls />
+        <div className="titlebar-drag" data-tauri-drag-region={isAndroid ? undefined : true} />
+        {!isAndroid && <WindowControls />}
       </header>
       <div className="content">
         <div className="pane" hidden={!!active}>

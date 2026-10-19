@@ -1,19 +1,84 @@
-// AI provider plumbing. API keys live in the Windows Credential Manager and never reach the web
-// view: the UI sends requests with a placeholder where the key goes, and this module swaps the
-// real key in on the way out. Requests go out from here, so provider CORS rules never apply.
+// AI provider plumbing. API keys live in the Windows Credential Manager (on Android, in a file in
+// the app's private storage, which no other app can read) and never reach the web view: the UI
+// sends requests with a placeholder where the key goes, and this module swaps the real key in on
+// the way out. Requests go out from here, so provider CORS rules never apply.
 use crate::store::Res;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+#[cfg(not(target_os = "android"))]
 const SERVICE: &str = "goodink";
 const SECRET_MARK: &str = "__GOODINK_SECRET__";
 
-fn entry(name: &str) -> Res<keyring::Entry> {
+fn check_name(name: &str) -> Res<()> {
     let ok = !name.is_empty() && name.len() <= 40 && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-    if !ok {
-        return Err("bad secret name".into());
+    if ok { Ok(()) } else { Err("bad secret name".into()) }
+}
+
+#[cfg(not(target_os = "android"))]
+mod vault {
+    use super::*;
+    fn entry(name: &str) -> Res<keyring::Entry> {
+        check_name(name)?;
+        keyring::Entry::new(SERVICE, &format!("ai-{name}")).map_err(|e| e.to_string())
     }
-    keyring::Entry::new(SERVICE, &format!("ai-{name}")).map_err(|e| e.to_string())
+    pub fn get(name: &str) -> Option<String> {
+        entry(name).ok()?.get_password().ok()
+    }
+    pub fn set(name: &str, v: &str) -> Res<()> {
+        entry(name)?.set_password(v).map_err(|e| e.to_string())
+    }
+    pub fn delete(name: &str) -> Res<()> {
+        match entry(name)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+}
+
+#[cfg(target_os = "android")]
+mod vault {
+    use super::*;
+    use std::collections::BTreeMap;
+    use std::sync::Mutex;
+    static LOCK: Mutex<()> = Mutex::new(());
+    fn path() -> std::path::PathBuf {
+        crate::profile_dir().join("secrets.json")
+    }
+    fn load() -> BTreeMap<String, String> {
+        std::fs::read_to_string(path()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+    }
+    fn save(m: &BTreeMap<String, String>) -> Res<()> {
+        let p = path();
+        if let Some(d) = p.parent() {
+            std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
+        }
+        let tmp = p.with_extension("tmp");
+        std::fs::write(&tmp, serde_json::to_vec(m).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+        }
+        std::fs::rename(&tmp, &p).map_err(|e| e.to_string())
+    }
+    pub fn get(name: &str) -> Option<String> {
+        check_name(name).ok()?;
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        load().remove(name)
+    }
+    pub fn set(name: &str, v: &str) -> Res<()> {
+        check_name(name)?;
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut m = load();
+        m.insert(name.into(), v.into());
+        save(&m)
+    }
+    pub fn delete(name: &str) -> Res<()> {
+        check_name(name)?;
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut m = load();
+        if m.remove(name).is_some() { save(&m) } else { Ok(()) }
+    }
 }
 
 #[tauri::command]
@@ -22,20 +87,17 @@ pub fn secret_set(name: String, value: String) -> Res<()> {
     if v.is_empty() {
         return Err("The key is empty.".into());
     }
-    entry(&name)?.set_password(v).map_err(|e| e.to_string())
+    vault::set(&name, v)
 }
 
 #[tauri::command]
 pub fn secret_has(names: Vec<String>) -> Vec<String> {
-    names.into_iter().filter(|n| entry(n).and_then(|e| e.get_password().map_err(|e| e.to_string())).is_ok()).collect()
+    names.into_iter().filter(|n| vault::get(n).is_some()).collect()
 }
 
 #[tauri::command]
 pub fn secret_delete(name: String) -> Res<()> {
-    match entry(&name)?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(e.to_string()),
-    }
+    vault::delete(&name)
 }
 
 #[derive(Deserialize)]
@@ -71,7 +133,7 @@ fn build(req: AiRequest) -> Res<reqwest::RequestBuilder> {
         return Err("Only https addresses (or a model server on this PC) can be used.".into());
     }
     let secret = match &req.secret {
-        Some(n) => Some(entry(n)?.get_password().map_err(|_| "No API key is saved for this provider. Add one in Settings → AI.".to_string())?),
+        Some(n) => Some(vault::get(n).ok_or_else(|| "No API key is saved for this provider. Add one in Settings → AI.".to_string())?),
         None => None,
     };
     let client = reqwest::Client::builder().timeout(Duration::from_secs(30 * 60)).build().map_err(|e| e.to_string())?;
