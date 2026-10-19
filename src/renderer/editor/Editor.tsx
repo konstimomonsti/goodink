@@ -22,6 +22,7 @@ import { LinkNoteDialog } from './LinkNote';
 import { strokeToJSON, objectBBox } from '../engine/model';
 import { bboxUnion, type BBox } from '../engine/geometry';
 import type { LiveBridge } from '../live/ui/LiveLayer';
+import { isAndroid } from '../lib/util';
 
 // the chat panel pulls in the AI provider SDKs, so it loads on first use
 const AskPanel = lazy(() => import('./AiDialogs').then((m) => ({ default: m.AskPanel })));
@@ -839,7 +840,7 @@ function CameraPopover({ anchor, onClose }: { anchor: DOMRect; onClose: () => vo
           void video.current.play();
         }
       })
-      .catch(() => setErr('No camera available, or camera access is turned off in Windows privacy settings.'));
+      .catch(() => setErr(isAndroid ? 'No camera available, or goodink is not allowed to use it in Android settings.' : 'No camera available, or camera access is turned off in Windows privacy settings.'));
     return () => stream?.getTracks().forEach((t) => t.stop());
   }, []);
   const snap = async () => {

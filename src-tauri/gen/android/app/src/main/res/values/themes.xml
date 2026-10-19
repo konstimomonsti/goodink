@@ -1,6 +1,7 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
+    <!-- Base application theme. The window shows around the web view (behind the status and
+         navigation bars, which goodink keeps clear of): the colour of goodink's top bar. -->
     <style name="Theme.goodink" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
+        <item name="android:windowBackground">#FFFFFF</item>
     </style>
 </resources>

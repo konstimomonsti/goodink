@@ -39,7 +39,7 @@ export function BackupDialog({ folderId }: { folderId: string | null }) {
       try {
         const bytes = await backupTreeGink(folderId, target, (d, n) => updateToast(tid, { progress: d / Math.max(1, n) }));
         dismissToast(tid);
-        toast(`Backup saved (${mb(bytes)})`, { kind: 'success', action: { label: 'Show', run: () => void api.revealFile(target) } });
+        toast(`Backup saved (${mb(bytes)})`, { kind: 'success', action: api.showAction(target) });
       } catch (e) {
         dismissToast(tid);
         toast(`Backup failed: ${(e as Error).message ?? e}`, { kind: 'error', ms: 7000 });
@@ -67,7 +67,7 @@ export function BackupDialog({ folderId }: { folderId: string | null }) {
       if (!r.files.length) return void toast(stop ? 'Stopped: nothing was saved' : 'Nothing to print here', { kind: 'info' });
       const left = r.skipped.length ? ` · ${plural(r.skipped.length, 'locked notebook or deck', 'locked notebooks or decks')} left out` : '';
       const what = mode === 'one' ? `PDF saved: ${plural(r.notebooks, 'notebook')}, ${plural(r.pages, 'page')}` : `${plural(r.files.length, 'PDF')} saved`;
-      toast(`${stop ? 'Stopped. ' : ''}${what}${left}`, { kind: 'success', ms: 7000, action: { label: 'Show', run: () => void api.revealFile(r.files[0]) } });
+      toast(`${stop ? 'Stopped. ' : ''}${what}${left}`, { kind: 'success', ms: 7000, action: api.showAction(r.files[0]) });
     } catch (e) {
       dismissToast(tid);
       toast(`PDF export failed: ${(e as Error).message ?? e}`, { kind: 'error', ms: 7000 });
@@ -120,6 +120,7 @@ export function BackupDialog({ folderId }: { folderId: string | null }) {
         </p>
       ) : (
         <>
+          {api.canPickFolder && (
           <Field label="Files">
             <Segmented
               label="Files"
@@ -131,6 +132,7 @@ export function BackupDialog({ folderId }: { folderId: string | null }) {
               ]}
             />
           </Field>
+          )}
           <Toggle label="Include handwriting and annotations" checked={annotations} onChange={setAnnotations} />
           <Toggle label="Include paper templates" checked={templates} onChange={setTemplates} />
           {unprintable > 0 && (

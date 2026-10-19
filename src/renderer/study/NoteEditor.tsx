@@ -12,6 +12,7 @@ import { Button, IconButton, Menu, Modal, Popover, type MenuItem } from '../ui/p
 import { toast } from '../lib/store';
 import { clozeNumbers, type NoteType } from './notetypes';
 import { sanitizeCard } from './CardHtml';
+import { isAndroid } from '../lib/util';
 
 // ---- helpers ------------------------------------------------------------------------------------
 
@@ -585,7 +586,7 @@ function RecordDialog({ onClose, onDone }: { onClose: () => void; onDone: (html:
           if (s2 >= 120) stop(true);
         }, 250);
       })
-      .catch(() => setError('goodink could not use a microphone. Check that one is connected and that Windows allows apps to use it.'));
+      .catch(() => setError(`goodink could not use a microphone. Check that one is connected and that ${isAndroid ? 'Android' : 'Windows'} allows goodink to use it.`));
     return () => {
       live = false;
       clearInterval(timer);

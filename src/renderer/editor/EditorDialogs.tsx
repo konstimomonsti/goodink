@@ -49,12 +49,14 @@ export function ExportDialog({ nbId, pageIndex }: { nbId: string; pageIndex?: nu
         const bytes = await exportPdf(s, { pages, includeAnnotations: annotations, includeTemplates: templates, onProgress: (d, t) => updateToast(tid, { progress: d / t }) });
         await api.writeFile(target, bytes);
         dismissToast(tid);
-        toast('PDF exported', { kind: 'success', action: { label: 'Show', run: () => void api.revealFile(target) } });
+        toast('PDF exported', { kind: 'success', action: api.showAction(target) });
       } catch (e) {
         dismissToast(tid);
         toast(`Export failed: ${(e as Error).message}`, { kind: 'error', ms: 7000 });
       }
     } else {
+      // Android saves through its picker, one file per pick: several pages go into a PDF instead
+      if (!api.canPickFolder && pages.length > 1) return void toast('On Android, export one page as an image, or several pages as a PDF.', { kind: 'info', ms: 6000 });
       const target = await api.saveDialog({ title: 'Export image', defaultPath: `${title}${pages.length > 1 ? ' - page 1' : ''}.png`, filters: [{ name: 'PNG image', extensions: ['png'] }] });
       if (!target) return;
       setBusy(true);
@@ -66,7 +68,7 @@ export function ExportDialog({ nbId, pageIndex }: { nbId: string; pageIndex?: nu
         updateToast(tid, { progress: (k + 1) / pages.length });
       }
       dismissToast(tid);
-      toast(`Exported ${pages.length} image${pages.length === 1 ? '' : 's'}`, { kind: 'success', action: { label: 'Show', run: () => void api.revealFile(target) } });
+      toast(`Exported ${pages.length} image${pages.length === 1 ? '' : 's'}`, { kind: 'success', action: api.showAction(target) });
     }
   };
 

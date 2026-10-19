@@ -9,6 +9,7 @@ mod speech;
 mod ocr;
 mod store;
 mod tree;
+mod uri;
 
 use serde_json::Value;
 use std::fs;
@@ -886,6 +887,10 @@ pub fn run() {
 
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default();
+    #[cfg(target_os = "android")]
+    {
+        builder = builder.plugin(uri::plugin());
+    }
     #[cfg(desktop)]
     if !test {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
@@ -917,7 +922,7 @@ pub fn run() {
             library_save, library_scan, file_open, item_reveal, file_rename, file_move, file_import, file_trash,
             ink::ink_analyze, speech::speech_start, speech::speech_stop,
             hmer::hmer_recognize, hmer::hmer_status, hmer::hmer_install,
-            backup::backup_tree_export, backup::backup_tree_import, backup::backup_kind
+            backup::backup_tree_export, backup::backup_tree_import, backup::backup_kind, uri::uri_import, uri::uri_export
         ])
         .setup(move |app| {
             T_SETUP.store(now_ms(), Ordering::Relaxed);

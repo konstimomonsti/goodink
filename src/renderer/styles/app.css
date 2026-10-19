@@ -1,6 +1,8 @@
 /* goodink app styles. Every value comes from tokens.css. */
 *, *::before, *::after { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
+/* no grey flash over tapped buttons on touch screens (Android); buttons show their own pressed state */
+html { -webkit-tap-highlight-color: transparent; }
 body {
   font: var(--t-base);
   color: var(--c-text);

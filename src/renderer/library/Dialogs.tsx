@@ -7,6 +7,7 @@ import { api } from '../lib/api';
 import { Button, Field, Modal, Segmented, Toggle } from '../ui/primitives';
 import { CoverArt, COVER_COLORS, COVER_STYLES, TemplatePreview } from './CoverArt';
 import { TEMPLATE_LIST } from '../engine/templates';
+import { isAndroid } from '../lib/util';
 // the AI section pulls in the provider SDKs, so it loads only when Settings opens
 const AiSettingsSection = lazy(() => import('../editor/AiDialogs').then((m) => ({ default: m.AiSettingsSection })));
 
@@ -294,31 +295,36 @@ export function SettingsDialog() {
       </Suspense>
       <section>
         <h3>Search</h3>
-        <Toggle label="Make handwriting searchable" hint="Uses the text recognition built into Windows. Nothing leaves this PC." checked={s.ocrEnabled} onChange={(ocrEnabled) => updateSettings({ ocrEnabled })} />
+        {/* Windows' own text recognition: not on Android */}
+        {!isAndroid && <Toggle label="Make handwriting searchable" hint="Uses the text recognition built into Windows. Nothing leaves this PC." checked={s.ocrEnabled} onChange={(ocrEnabled) => updateSettings({ ocrEnabled })} />}
       </section>
       <section>
         <h3>Storage</h3>
         <p className="muted small">Your library is stored at</p>
         <code className="path">{path}</code>
         <div className="row">
-          <Button size="sm" onClick={() => void api.revealFile(path + '\\library.json')}>
-            Show in Explorer
-          </Button>
-          <Button
-            size="sm"
-            onClick={async () => {
-              const dir = await api.folderDialog();
-              if (dir) await changeLibraryFolder(dir);
-            }}
-          >
-            Move library… (e.g. into OneDrive)
-          </Button>
+          {api.canReveal && (
+            <Button size="sm" onClick={() => void api.revealFile(path + '\\library.json')}>
+              Show in Explorer
+            </Button>
+          )}
+          {api.canPickFolder && (
+            <Button
+              size="sm"
+              onClick={async () => {
+                const dir = await api.folderDialog();
+                if (dir) await changeLibraryFolder(dir);
+              }}
+            >
+              Move library… (e.g. into OneDrive)
+            </Button>
+          )}
           <Button size="sm" onClick={() => openDialog({ type: 'backup', folderId: null })}>
             Back up everything…
           </Button>
         </div>
       </section>
-      <p className="muted small about">goodink {version} · Handwriting and PDF notes for Windows</p>
+      <p className="muted small about">goodink {version} · Handwriting and PDF notes for {isAndroid ? 'Android' : 'Windows'}</p>
     </Modal>
   );
 }

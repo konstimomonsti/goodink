@@ -207,7 +207,8 @@ export async function boot() {
     void pdfEngine().then((m) => m.trimPdfCaches());
     window.dispatchEvent(new Event('goodink:trim'));
   });
-  if (!info.chosen) set({ askStorage: true });
+  // Android keeps the library in the app's own storage: there is no folder to choose
+  if (!info.chosen && api.canPickFolder) set({ askStorage: true });
   // warm the editor and PDF engine while the user looks at the library: opening is then instant
   requestIdleCallback(() => {
     void import('../engine/session');
@@ -1037,7 +1038,7 @@ export async function exportBackup(id: string) {
   const target = await api.saveDialog({ title: 'Back up notebook', defaultPath: `${n.title.replace(/[\\/:*?"<>|]/g, '_')}.gink`, filters: [{ name: 'goodink backup', extensions: ['gink'] }] });
   if (!target) return;
   await api.backupExport(id, n, target);
-  toast('Backup saved', { kind: 'success', action: { label: 'Show', run: () => void api.revealFile(target) } });
+  toast('Backup saved', { kind: 'success', action: api.showAction(target) });
 }
 
 // ---- folder and library backups ----------------------------------------------------------------

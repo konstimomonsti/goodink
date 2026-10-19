@@ -55,7 +55,7 @@ export function HandwritingModel() {
         <span className="live-model-title">On-device math reader</span>
         <span className="live-model-line">
           {state === 'ready'
-            ? 'Installed. Reads handwritten formulas on this PC, offline.'
+            ? 'Installed. Reads handwritten formulas on this device, offline.'
             : `Pix2Text MFR, free (MIT). Reads handwritten formulas far better than the built-in recogniser, offline.${bytes ? ` ${mb(bytes)}, once.` : ''}`}
         </span>
         {state === 'installing' && (

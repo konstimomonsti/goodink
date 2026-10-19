@@ -11,6 +11,7 @@ import { drawInk, drawTexts } from '../engine/render';
 import { drawStroke } from '../engine/ink';
 import { Button, IconButton, Segmented } from '../ui/primitives';
 import type { SavedElement } from '../../shared/types';
+import { isAndroid } from '../lib/util';
 
 export function SearchPanel({ s, vp, onClose, initial }: { s: NotebookSession; vp: Viewport | null; onClose: () => void; initial?: string }) {
   const [q, setQ] = useState(initial ?? '');
@@ -258,7 +259,7 @@ export function AudioPanel({ s, currentPageId, onClose }: { s: NotebookSession; 
       mr.start(1000);
       setRec({ mr, started: Date.now(), chunks, stream });
     } catch {
-      toast('No microphone available. Check Windows privacy settings for microphone access.', { kind: 'error', ms: 6000 });
+      toast(isAndroid ? 'No microphone available. Allow goodink to use the microphone in Android settings.' : 'No microphone available. Check Windows privacy settings for microphone access.', { kind: 'error', ms: 6000 });
     }
   };
 

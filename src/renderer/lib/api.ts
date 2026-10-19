@@ -5,7 +5,8 @@ import { listen, emitTo, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow, availableMonitors, primaryMonitor } from '@tauri-apps/api/window';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getVersion } from '@tauri-apps/api/app';
-import { documentDir, join } from '@tauri-apps/api/path';
+import { documentDir, join, tempDir } from '@tauri-apps/api/path';
+import { isAndroid } from './util';
 import { open as openDlg, save as saveDlg } from '@tauri-apps/plugin-dialog';
 import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { writeImage, readImage } from '@tauri-apps/plugin-clipboard-manager';
@@ -86,6 +87,19 @@ export interface InkAnalysis { engine: 'analyzer' | 'recognizer'; lines: InkLine
 export interface HmerOptions { model?: string; topK?: number; beam?: number; ep?: 'cpu' | 'dml'; xh?: number; pen?: number; square?: boolean; maxLen?: number; debugPng?: boolean }
 export interface HmerResult { hyps: { latex: string; logp: number; prob: number; tokens: number }[]; model: string; ep: string; ms: number; renderMs: number; encMs: number; decMs: number; steps: number; loadMs: number; debugPng?: number[] | null }
 export interface HmerStatus { models: { id: string; installed: boolean; bytes: number; loaded: boolean }[]; defaultModel: string; runtime: { Ok: string } | { Err: string } | null; dir: string }
+
+/** Android's picker gives content:// URIs, not paths (src-tauri/src/uri.rs). */
+const isUri = (p: string) => /^content:/i.test(p);
+/** A picked file as a path goodink can read: content:// files are copied into the app's cache. */
+const localPath = (p: string): Promise<string> => (isUri(p) ? invoke<string>('uri_import', { uri: p }) : Promise.resolve(p));
+/** Write an export to `target`; a content:// target is written to the cache first, then copied out. */
+async function exportTo<T>(target: string, write: (path: string) => Promise<T>): Promise<T> {
+  if (!isUri(target)) return write(target);
+  const tmp = await join(await tempDir(), `goodink-export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  const r = await write(tmp);
+  await invoke('uri_export', { path: tmp, uri: target });
+  return r;
+}
 
 export const api = {
   /** Everything the library screen needs, in one round trip. */
@@ -176,18 +190,27 @@ export const api = {
     };
   },
   openDialog: async (opts: { title?: string; filters: Filter[]; multi?: boolean }): Promise<string[]> => {
-    const r = await openDlg({ title: opts.title, filters: opts.filters, multiple: !!opts.multi, directory: false });
-    return r == null ? [] : Array.isArray(r) ? r : [r];
+    // Android's picker filters by MIME type, and .gink has none: a backup is a zip (or unknown bytes)
+    const filters = isAndroid ? opts.filters.map((f) => ({ ...f, extensions: f.extensions.flatMap((e) => (e === 'gink' ? ['application/zip', 'application/octet-stream'] : [e])) })) : opts.filters;
+    const r = await openDlg({ title: opts.title, filters, multiple: !!opts.multi, directory: false });
+    return Promise.all((r == null ? [] : Array.isArray(r) ? r : [r]).map(localPath));
   },
+  /** On Android the result is a content:// URI: writeFile and the backup exports accept it. */
   saveDialog: async (opts: { title?: string; defaultPath: string; filters: Filter[] }): Promise<string | null> =>
-    (await saveDlg({ title: opts.title, defaultPath: await join(await documentDir(), opts.defaultPath), filters: opts.filters })) ?? null,
+    (await saveDlg({ title: opts.title, defaultPath: isAndroid ? opts.defaultPath : await join(await documentDir(), opts.defaultPath), filters: opts.filters })) ?? null,
+  /** Picking a folder to write into needs real paths: not offered on Android. */
+  canPickFolder: !isAndroid,
   folderDialog: async (): Promise<string | null> => {
     const r = await openDlg({ directory: true, multiple: false });
     return typeof r === 'string' ? r : null;
   },
   readFile: (p: string): Promise<Uint8Array> => bytes(invoke<ArrayBuffer>('file_read', { path: p })),
-  writeFile: (p: string, data: Uint8Array): Promise<void> => invoke('file_write', data, { headers: { path: enc(p) } }),
+  writeFile: (p: string, data: Uint8Array): Promise<void> => exportTo(p, (path) => invoke('file_write', data, { headers: { path: enc(path) } })),
   revealFile: (p: string): Promise<void> => revealItemInDir(p),
+  /** A toast's "Show" button for a saved file (Android has no file manager to show it in). */
+  showAction: (p: string | undefined): { label: string; run: () => void } | undefined => (isAndroid || !p || isUri(p) ? undefined : { label: 'Show', run: () => void revealItemInDir(p) }),
+  /** Show in Explorer exists on Windows only. */
+  canReveal: !isAndroid,
   /** open a web page in the user's browser (https only) */
   openUrl: (url: string): Promise<void> => (/^https:\/\//.test(url) ? openUrl(url) : Promise.resolve()),
   /** Dropped files arrive as bytes; the backend parks them in a temp file and returns its path. */
@@ -241,11 +264,11 @@ export const api = {
   presentFrame: (frame: { src: string; w: number; h: number }) => void emitTo('present', 'present:frame', frame).catch(() => undefined),
   presentLaser: (pts: { x: number; y: number; t: number }[]) => void emitTo('present', 'present:laser', pts).catch(() => undefined),
   print: (pages: string[]): Promise<boolean> => printImages(pages),
-  backupExport: (nbId: string, meta: unknown, target: string): Promise<void> => invoke('backup_export', { nb: nbId, meta, target }),
+  backupExport: (nbId: string, meta: unknown, target: string): Promise<void> => exportTo(target, (path) => invoke('backup_export', { nb: nbId, meta, target: path })),
   backupImport: (file: string, newId: string): Promise<any> => invoke('backup_import', { file, newId }),
   /** a folder (or with null the whole library) into one .gink; resolves to the bytes written */
   backupTreeExport: (folder: string | null, title: string, items: { id: string; kind: string; meta: unknown }[], target: string): Promise<number> =>
-    invoke('backup_tree_export', { folder, title, items, target }),
+    exportTo(target, (path) => invoke('backup_tree_export', { folder, title, items, target: path })),
   backupTreeImport: (file: string, folder: string | null, name: string): Promise<{ scan: DiskScan; restored: { id: string; kind: 'folder' | 'notebook' | 'link'; meta: any }[]; top: string | null }> =>
     invoke('backup_tree_import', { file, folder, name }),
   backupKind: (file: string): Promise<{ kind: 'notebook' | 'folder' | 'library'; title?: string; created?: string; count?: number }> => invoke('backup_kind', { file }),

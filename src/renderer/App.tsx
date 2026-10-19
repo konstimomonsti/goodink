@@ -253,9 +253,9 @@ function Toasts() {
 function Onboarding() {
   const [step, setStep] = useState(0);
   const steps = [
-    { icon: <PenTool size={34} />, t: 'Paper that keeps up with your pen', b: 'Write with a Surface Pen or any Windows Ink stylus. Pressure, tilt-free shading and the eraser end all work. A mouse works too.' },
+    { icon: <PenTool size={34} />, t: 'Paper that keeps up with your pen', b: isAndroid ? 'Write with your tablet’s stylus. Pressure and the eraser end work, and two fingers pan and zoom.' : 'Write with a Surface Pen or any Windows Ink stylus. Pressure, tilt-free shading and the eraser end all work. A mouse works too.' },
     { icon: <FileUp size={34} />, t: 'Bring your PDFs', b: 'Import lecture slides, papers or forms, write straight on them, and export a clean PDF with your notes on top.' },
-    { icon: <SearchIcon size={34} />, t: 'Find anything you wrote', b: 'Your handwriting becomes searchable using the text recognition built into Windows. Everything stays on this PC.' },
+    { icon: <SearchIcon size={34} />, t: 'Find anything you wrote', b: isAndroid ? 'Search the typed text in your notes and the text of your PDFs, and link notes and pages to each other.' : 'Your handwriting becomes searchable using the text recognition built into Windows. Everything stays on this PC.' },
   ];
   const s = steps[step];
   const done = () => updateSettings({ onboarded: true });
