@@ -54,35 +54,10 @@ macro_rules! hf {
         concat!("https://huggingface.co/breezedeus/pix2text-mfr-1.5/resolve/1cef9f0bdcd6a4c63df7de1311fb0894593340cc/", $f)
     };
 }
-/// The derived int8 files (made from the MIT Pix2Text MFR 1.5 export with the steps in
-/// docs/live-ink/hmer.md). TODO(lead): upload enc.int8.onnx and dec.int8.onnx to this release.
-macro_rules! int8 {
-    ($f:literal) => {
-        concat!("https://github.com/goodink-app/goodink-models/releases/download/hmer-p2t-mfr-1.5-int8/", $f)
-    };
-}
 const TOKENIZER_SHA: &str = "4ffbeb2143e6a38324bb6111b7a8109530d38a076a8439aa5777535f0a32758a";
 
 static MODELS: &[ModelSpec] = &[
-    // default: Pix2Text MFR 1.5 (MIT), int8, cross-attention K/V folded into the encoder: 35 MB
-    ModelSpec {
-        id: "p2t-mfr-1.5-int8",
-        enc: "enc.int8.onnx",
-        dec: "dec.int8.onnx",
-        tokenizer: "tokenizer.json",
-        files: &[
-            FileSpec { name: "enc.int8.onnx", url: int8!("enc.int8.onnx"), sha256: "39b189c967b2f192d27d72d0ecfbbe5873dce7b1a16f9963439dae801ba48b51", size: 25_215_222 },
-            FileSpec { name: "dec.int8.onnx", url: int8!("dec.int8.onnx"), sha256: "2e72c44d760ca194031b35136cd648aeee58537fd343237439f9760ff8555a40", size: 9_516_977 },
-            FileSpec { name: "tokenizer.json", url: hf!("tokenizer.json"), sha256: TOKENIZER_SHA, size: 113_168 },
-        ],
-        size: 384,
-        channels: 3,
-        mean: 0.5,
-        std: 0.5,
-        start: 1,
-        eos: 2,
-    },
-    // the official fp32 export, straight from Hugging Face: 120 MB, slower decoding (no K/V reuse)
+    // Pix2Text MFR 1.5 (MIT): the official export, pinned on Hugging Face, 120 MB
     ModelSpec {
         id: "p2t-mfr-1.5",
         enc: "encoder_model.onnx",
@@ -102,7 +77,7 @@ static MODELS: &[ModelSpec] = &[
     },
 ];
 
-const DEFAULT_MODEL: &str = "p2t-mfr-1.5-int8";
+const DEFAULT_MODEL: &str = "p2t-mfr-1.5";
 
 fn spec(id: &str) -> Res<&'static ModelSpec> {
     MODELS.iter().find(|m| m.id == id).ok_or_else(|| format!("unknown model {id}"))

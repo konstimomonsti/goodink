@@ -6,11 +6,12 @@ import { DEFAULT_LIVE, type LiveSettings } from '../../../shared/types';
 import { openDialog, updateSettings, useApp } from '../../lib/store';
 import { Popover, Toggle } from '../../ui/primitives';
 import type { LiveMode, LiveStatus } from './engineApi';
+import { HandwritingModel } from './HandwritingModel';
 
 export const MODES: { id: LiveMode; label: string; line: string; icon: React.ReactNode }[] = [
   { id: 'off', label: 'Off', line: 'Nothing is checked.', icon: <Power size={15} /> },
   { id: 'local', label: 'Local', line: 'Free and private. Nothing leaves your PC.', icon: <Cpu size={15} /> },
-  { id: 'smart', label: 'Smart', line: 'Local first; AI only for steps it cannot decide. Few tokens.', icon: <Gauge size={15} /> },
+  { id: 'smart', label: 'Smart', line: 'Instant check on this PC, then the AI model checks every formula.', icon: <Gauge size={15} /> },
   { id: 'max', label: 'Max', line: 'AI checks every step and double-checks mistakes. Most tokens.', icon: <Zap size={15} /> },
 ];
 
@@ -146,6 +147,7 @@ export function LiveModePicker({ status, onDone, compact = false }: { status: Li
           </button>
         ))}
       </div>
+      {live.mode !== 'off' && <HandwritingModel />}
       {!compact && (
         <>
           <div className="live-pop-stats" aria-live="polite">

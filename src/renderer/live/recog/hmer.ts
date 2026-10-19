@@ -412,6 +412,7 @@ const round = (p: ArrayLike<number>) => {
 export function hmerBackend(call: HmerCall, opts: HmerBackendOptions = {}): RecogBackend {
   return {
     name: 'hmer',
+    math: true,
     async recognize(lines: LineInput[]) {
       const out: (LineRecognition | null)[] = [];
       for (const l of lines) {

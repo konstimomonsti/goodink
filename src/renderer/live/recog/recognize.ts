@@ -121,6 +121,8 @@ export function fuse(results: (LineRecognition | null)[], backends: Pick<RecogBa
   const room = Math.max(0, 1 - top);
   const scale = rest > room && rest > 0 ? room / rest : 1;
   top = Math.min(0.995, top);
+  // two readers disagree on the line: never sure enough for a local red (0.9); the cloud settles it
+  if (items.some((x) => key(x.r.text) !== k0 && x.r.confidence >= 0.3)) top = Math.min(top, DISAGREE_CAP);
   const alts = ranked.slice(0, 5).map(([, e]) => e);
   return {
     ...win.r,
@@ -133,6 +135,9 @@ export function fuse(results: (LineRecognition | null)[], backends: Pick<RecogBa
     alternateLatex: alts.map((e) => e.latex),
   };
 }
+
+/** confidence cap when the readers disagree on a line */
+export const DISAGREE_CAP = 0.85;
 
 const CACHE_MAX = 600;
 
