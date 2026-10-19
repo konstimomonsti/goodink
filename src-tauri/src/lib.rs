@@ -2,6 +2,7 @@
 //! file system: notebooks, assets, search, OCR, backups, the notebooks-folder choice and app lifecycle.
 
 mod ai;
+mod backup;
 mod hmer;
 mod ink;
 mod speech;
@@ -305,7 +306,11 @@ fn file_read(path: String) -> Res<Response> {
 #[tauri::command]
 fn file_write(request: Request) -> Res<()> {
     let path = header(&request, "path")?;
-    let path = decode_header(&path);
+    let path = PathBuf::from(decode_header(&path));
+    // exports into a tree of folders (one PDF per notebook) make the folders on the way
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
     fs::write(path, raw_body(&request)?).map_err(|e| e.to_string())
 }
 
@@ -911,7 +916,8 @@ pub fn run() {
             ai::secret_set, ai::secret_has, ai::secret_delete, ai::ai_fetch, ai::ai_fetch_stream, ai::ai_fetch_cancel, study_file_put, study_file_get, web_preview_create, web_window_open, present_open,
             library_save, library_scan, file_open, item_reveal, file_rename, file_move, file_import, file_trash,
             ink::ink_analyze, speech::speech_start, speech::speech_stop,
-            hmer::hmer_recognize, hmer::hmer_status, hmer::hmer_install
+            hmer::hmer_recognize, hmer::hmer_status, hmer::hmer_install,
+            backup::backup_tree_export, backup::backup_tree_import, backup::backup_kind
         ])
         .setup(move |app| {
             T_SETUP.store(now_ms(), Ordering::Relaxed);

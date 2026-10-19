@@ -11,6 +11,7 @@ import { NewNotebookDialog, RenameDialog, MoveDialog, CoverDialog, ConfirmDialog
 const ExportDialog = lazy(() => import('./editor/EditorDialogs').then((m) => ({ default: m.ExportDialog })));
 const PageTemplateDialog = lazy(() => import('./editor/EditorDialogs').then((m) => ({ default: m.PageTemplateDialog })));
 const AiDialog = lazy(() => import('./editor/AiDialogs').then((m) => ({ default: m.AiDialog })));
+const BackupDialog = lazy(() => import('./library/BackupDialog').then((m) => ({ default: m.BackupDialog })));
 import { Button, Spinner } from './ui/primitives';
 
 /** Minimise / maximise / close for the frameless window (Windows-style, right aligned). */
@@ -207,6 +208,8 @@ function DialogHost() {
       return <PageTemplateDialog nbId={d.nbId} />;
     case 'ai':
       return <AiDialog nbId={d.nbId} pageIndex={d.pageIndex} />;
+    case 'backup':
+      return <BackupDialog folderId={d.folderId} />;
     default:
       void closeDialog;
       return null;

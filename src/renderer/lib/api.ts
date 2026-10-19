@@ -243,6 +243,13 @@ export const api = {
   print: (pages: string[]): Promise<boolean> => printImages(pages),
   backupExport: (nbId: string, meta: unknown, target: string): Promise<void> => invoke('backup_export', { nb: nbId, meta, target }),
   backupImport: (file: string, newId: string): Promise<any> => invoke('backup_import', { file, newId }),
+  /** a folder (or with null the whole library) into one .gink; resolves to the bytes written */
+  backupTreeExport: (folder: string | null, title: string, items: { id: string; kind: string; meta: unknown }[], target: string): Promise<number> =>
+    invoke('backup_tree_export', { folder, title, items, target }),
+  backupTreeImport: (file: string, folder: string | null, name: string): Promise<{ scan: DiskScan; restored: { id: string; kind: 'folder' | 'notebook' | 'link'; meta: any }[]; top: string | null }> =>
+    invoke('backup_tree_import', { file, folder, name }),
+  backupKind: (file: string): Promise<{ kind: 'notebook' | 'folder' | 'library'; title?: string; created?: string; count?: number }> => invoke('backup_kind', { file }),
+  onBackupProgress: (fn: (p: { done: number; total: number }) => void): Promise<UnlistenFn> => listen<{ done: number; total: number }>('backup:progress', (e) => fn(e.payload)),
   pendingOpen: (): Promise<string[]> => invoke('pending_open'),
   version: (): Promise<string> => getVersion(),
   flushed: (): Promise<void> => invoke('app_flushed'),

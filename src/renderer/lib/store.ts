@@ -24,6 +24,7 @@ export type Dialog =
   | { type: 'confirm'; title: string; body: string; danger?: boolean; ok: string; run: () => void }
   | { type: 'password'; title: string; resolve: (pw: string | null) => void }
   | { type: 'ai'; nbId: string; pageIndex?: number }
+  | { type: 'backup'; folderId: string | null }
   | null;
 
 export interface Toast {
@@ -740,6 +741,8 @@ export async function importImageFiles(paths: string[], folderId: string | null 
 export async function importBackup(path: string) {
   const newId = uid();
   try {
+    const info = await api.backupKind(path);
+    if (info.kind !== 'notebook') return void (await importTreeBackup(path, info.title ?? 'Restored'));
     const meta = (await api.backupImport(path, newId)) as NotebookMeta;
     const now = Date.now();
     const nm: NotebookMeta = { ...meta, id: newId, folderId: get().folderId, deletedAt: null, openedAt: now, updatedAt: now };
@@ -1035,6 +1038,89 @@ export async function exportBackup(id: string) {
   if (!target) return;
   await api.backupExport(id, n, target);
   toast('Backup saved', { kind: 'success', action: { label: 'Show', run: () => void api.revealFile(target) } });
+}
+
+// ---- folder and library backups ----------------------------------------------------------------
+
+/** What is inside a folder (null = the whole library), Trash left out: folders depth-first. */
+export function treeOf(folderId: string | null) {
+  const lib = get().library;
+  const folders: Folder[] = [];
+  const walk = (parent: string | null) => {
+    for (const f of lib.folders.filter((x) => x.parentId === parent && !x.deletedAt).sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }))) {
+      folders.push(f);
+      walk(f.id);
+    }
+  };
+  const top = folderId ? lib.folders.find((f) => f.id === folderId) : undefined;
+  if (top) folders.push(top);
+  walk(folderId);
+  const inside = new Set<string | null>(folders.map((f) => f.id));
+  if (!folderId) inside.add(null);
+  const notebooks = lib.notebooks.filter((n) => !n.deletedAt && inside.has(n.folderId));
+  const links = (lib.links ?? []).filter((x) => !x.deletedAt && inside.has(x.folderId));
+  const files = (lib.files ?? []).filter((f) => inside.has(f.folderId));
+  return { folders, notebooks, links, files };
+}
+
+/** Every open notebook and the library index written to disk (before a backup reads the disk). */
+export async function flushEverything() {
+  await Promise.all([...sessions.values()].map((s) => s.flush()));
+  await persistLibrary();
+}
+
+/** A folder (or with null the whole library) into one .gink file, with every item's metadata. */
+export async function backupTreeGink(folderId: string | null, target: string, onProgress?: (done: number, total: number) => void): Promise<number> {
+  await flushEverything();
+  const t = treeOf(folderId);
+  const items = [
+    ...t.folders.map((f) => ({ id: f.id, kind: 'folder', meta: f })),
+    ...t.notebooks.map((n) => ({ id: n.id, kind: 'notebook', meta: n })),
+    ...t.links.map((x) => ({ id: x.id, kind: 'link', meta: x })),
+  ];
+  const title = folderId ? (t.folders[0]?.title ?? 'Folder') : 'goodink library';
+  const un = onProgress ? await api.onBackupProgress((p) => onProgress(p.done, p.total)) : null;
+  try {
+    return await api.backupTreeExport(folderId, title, items, target);
+  } finally {
+    un?.();
+  }
+}
+
+/** Restore a folder or library backup as a new folder here, with covers, colours and favourites. */
+export async function importTreeBackup(path: string, title: string) {
+  const tid = toast(`Restoring “${title}”…`, { progress: 0 });
+  const un = await api.onBackupProgress((p) => updateToast(tid, { progress: p.done / Math.max(1, p.total) }));
+  try {
+    await flushEverything();
+    const folderId = get().folderId;
+    const r = await api.backupTreeImport(path, folderId, `${title} (restored)`);
+    saving = saving.then(() => applyDisk(r.scan));
+    await saving;
+    const meta = new Map(r.restored.map((x) => [x.id, x.meta]));
+    // the restored items keep their new ids, names and places; the rest comes from the backup
+    setLibrary((l) => ({
+      ...l,
+      folders: l.folders.map((f) => (meta.has(f.id) ? { ...f, color: meta.get(f.id).color ?? f.color } : f)),
+      notebooks: l.notebooks.map((n) => {
+        const m = meta.get(n.id);
+        return m ? { ...m, id: n.id, title: n.title, folderId: n.folderId, pageCount: n.pageCount, deletedAt: null, openedAt: 0, thumbVersion: (m.thumbVersion ?? 0) + 1 } : n;
+      }),
+      links: (l.links ?? []).map((x) => {
+        const m = meta.get(x.id);
+        return m ? { ...m, id: x.id, title: x.title, folderId: x.folderId, url: x.url, deletedAt: null } : x;
+      }),
+    }));
+    saveLibraryNow();
+    dismissToast(tid);
+    const n = r.restored.filter((x) => x.kind === 'notebook').length;
+    toast(`Restored “${title}”: ${n} notebook${n === 1 ? '' : 's'}`, { kind: 'success', action: r.top ? { label: 'Open', run: () => showSection('all', r.top!) } : undefined });
+  } catch (e) {
+    dismissToast(tid);
+    toast(`Could not restore the backup: ${(e as Error).message ?? e}`, { kind: 'error', ms: 7000 });
+  } finally {
+    un();
+  }
 }
 
 // ---- elements -----------------------------------------------------------------------------------

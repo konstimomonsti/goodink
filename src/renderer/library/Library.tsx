@@ -374,6 +374,8 @@ function LibraryMain() {
           { label: 'Rename', icon: <Pencil size={15} />, run: () => openDialog({ type: 'rename', kind: 'folder', id: f.id }) },
           { label: 'Move to…', icon: <FolderInput size={15} />, run: () => openDialog({ type: 'move', ids: [f.id] }) },
           { separator: true, label: '' },
+          { label: 'Back up (.gink or PDF)…', icon: <Archive size={15} />, run: () => openDialog({ type: 'backup', folderId: f.id }) },
+          { separator: true, label: '' },
           { label: 'Move to Trash', icon: <Trash2 size={15} />, danger: true, run: () => trashItems([f.id]) },
         ];
     setMenu({ x, y, items });
@@ -463,6 +465,9 @@ function LibraryMain() {
             <>
               <IconButton label="Show in Explorer" onClick={() => void api.reveal(folderId ? { id: folderId } : {})}>
                 <FolderOpen size={17} />
+              </IconButton>
+              <IconButton label={folder ? 'Back up this folder' : 'Back up everything'} onClick={() => openDialog({ type: 'backup', folderId })}>
+                <Archive size={17} />
               </IconButton>
               <Button variant="ghost" onClick={() => setFind(folderId)} title="Search the web and YouTube and save the best sources here">
                 <Sparkles size={16} /> Find sources

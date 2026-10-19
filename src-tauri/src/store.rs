@@ -152,6 +152,12 @@ impl Store {
         self.layout.lock().unwrap_or_else(|e| e.into_inner()).get(id).map(|e| e.path.clone())
     }
 
+    /// The item (folder, notebook, link) at a place on disk.
+    pub fn id_at(&self, path: &Path) -> Option<String> {
+        let layout = self.layout.lock().unwrap_or_else(|e| e.into_inner());
+        layout.iter().find(|(_, e)| !e.trashed && e.path == path).map(|(id, _)| id.clone())
+    }
+
     /// Move folders, notebooks and links to where the library has them; returns what is on disk.
     pub fn sync(&self, lib: &Value) -> Value {
         let mut layout = self.layout.lock().unwrap_or_else(|e| e.into_inner());

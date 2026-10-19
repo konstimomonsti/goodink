@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { Folder as FolderIcon, Home } from 'lucide-react';
 import type { Cover, PageSizeId, PaperColor, Template, TemplateKind } from '../../shared/types';
 import { PAGE_SIZES } from '../../shared/types';
-import { useApp, closeDialog, createNotebook, patchNotebook, patchFolder, patchLink, moveItems, updateSettings, toast, changeLibraryFolder, renameFile } from '../lib/store';
+import { useApp, closeDialog, openDialog, createNotebook, patchNotebook, patchFolder, patchLink, moveItems, updateSettings, toast, changeLibraryFolder, renameFile } from '../lib/store';
 import { api } from '../lib/api';
 import { Button, Field, Modal, Segmented, Toggle } from '../ui/primitives';
 import { CoverArt, COVER_COLORS, COVER_STYLES, TemplatePreview } from './CoverArt';
@@ -312,6 +312,9 @@ export function SettingsDialog() {
             }}
           >
             Move library… (e.g. into OneDrive)
+          </Button>
+          <Button size="sm" onClick={() => openDialog({ type: 'backup', folderId: null })}>
+            Back up everything…
           </Button>
         </div>
       </section>
