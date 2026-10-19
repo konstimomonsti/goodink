@@ -1228,3 +1228,9 @@ html, body { touch-action: pan-x pan-y; }
 .link-note-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; max-height: 120px; overflow: auto; }
 .link-note-chips button { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border-radius: var(--r-pill); border: 1px solid var(--c-border); font: 500 12.5px/1 var(--font-sans); color: var(--c-text); }
 .link-note-chips button.is-on { background: var(--c-accent); border-color: var(--c-accent); color: var(--c-on-accent); }
+
+/* the app window never scrolls as a whole: overflow inside one area must not shift the whole UI */
+html { overflow: hidden; }
+/* four navigator tabs (Pages, Marks, Outline, Links) share the sidebar's width */
+.nav-tabs .segmented { display: flex; width: 100%; min-width: 0; }
+.nav-tabs .segmented button { flex: 1; min-width: 0; justify-content: center; padding: 0 4px; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
