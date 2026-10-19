@@ -43,6 +43,8 @@ export interface Library {
   notebooks: NotebookMeta[];
   /** web pages and videos kept in folders next to notebooks (missing in older libraries) */
   links?: LinkItem[];
+  /** every link between notes, for backlinks (missing in older libraries) */
+  noteLinks?: LinkRef[];
   /** other files in the library's folders on disk (not saved: read from disk) */
   files?: FileItem[];
 }
@@ -122,6 +124,31 @@ export interface PageMeta {
   /** Infinite canvas only: world coordinate of the page's top-left corner (content never moves). */
   ox?: number;
   oy?: number;
+  /** links to other notes drawn over parts of this page (page units) */
+  links?: NoteLink[];
+}
+
+/** A link from an area of a page to another notebook, or one page of it (like Obsidian or Goodnotes). */
+export interface NoteLink {
+  id: Id;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** target notebook */
+  nb: Id;
+  /** target page; none = the notebook where it was last left */
+  page?: Id;
+}
+
+/** One link in the library-wide index, so a page knows what links to it (backlinks). */
+export interface LinkRef {
+  fromNb: Id;
+  fromPage: Id;
+  toNb: Id;
+  toPage?: Id;
+  /** 'area' = drawn with Link on a selection; 'typed' = [[Name]] in a text box */
+  kind: 'area' | 'typed';
 }
 
 export interface OutlineEntry {

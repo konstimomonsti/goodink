@@ -85,6 +85,11 @@ export interface ViewportCallbacks {
   onTempTool(tool: Tool | null): void;
   onEraseEnd(): void;
   onLaser(page: number, pts: { x: number; y: number; t: number }[]): void;
+  /** links to other notes: the notebook named in [[Name]], its title, and following a link */
+  resolveNoteName?(name: string): string | null;
+  noteTitle?(nb: string): string;
+  /** page: a page id, or a 1-based page number from [[Name#3]] */
+  onFollowLink?(nb: string, page?: string | number): void;
   /** "Select text" tool: the words selected on a PDF page (null when cleared), and where they are on screen */
   onTextSelect?(text: string | null, anchor: DOMRect | null): void;
   onToast(msg: string): void;
@@ -129,6 +134,8 @@ class PageView {
   ink: HTMLCanvasElement;
   tape: HTMLCanvasElement | null = null;
   marks: HTMLDivElement;
+  /** links to other notes over this page */
+  links: HTMLDivElement;
   scale = 0;
   dirtyBg = true;
   dirtyInk = true;
@@ -198,7 +205,9 @@ class PageView {
     this.ink = this.layer('gi-ink');
     this.marks = document.createElement('div');
     this.marks.className = 'gi-marks';
-    this.el.append(this.bg, this.ink, this.marks);
+    this.links = document.createElement('div');
+    this.links.className = 'gi-links';
+    this.el.append(this.bg, this.ink, this.marks, this.links);
     this.applyBlend();
   }
 
@@ -490,6 +499,7 @@ export class Viewport {
     this.updateVisible();
     if (this.textEdit) this.positionTextEditor();
     this.renderHighlights();
+    for (const v of this.views.values()) this.renderLinks(v);
     this.renderLive();
   }
 
@@ -662,6 +672,7 @@ export class Viewport {
       });
     }
     if (this.highlights && this.views.has(this.highlights.pageId) && !this.views.get(this.highlights.pageId)!.marks.childElementCount) this.renderHighlights();
+    for (const v of this.views.values()) if (!v.links.dataset.done) this.renderLinks(v);
     if (bestI >= 0 && bestI !== this.currentPage) {
       this.currentPage = bestI;
       this.cb.onPageChange(bestI);
@@ -1015,7 +1026,10 @@ export class Viewport {
       }
       if (this.sel?.pageId === e.pageId) this.revalidateSelection();
       if (this.highlights?.pageId === e.pageId) this.renderHighlights();
+      const lv = this.views.get(e.pageId);
+      if (lv) this.renderLinks(lv);
     } else if (e.type === 'pages') {
+      for (const v of this.views.values()) this.renderLinks(v);
       let dx = 0, dy = 0;
       for (const [id, v] of this.views) {
         const p = this.session.page(id);
@@ -3264,6 +3278,61 @@ export class Viewport {
   setHighlights(pageId: string | null, boxes: [number, number, number, number][], current: number[] = []) {
     this.highlights = pageId ? { pageId, boxes, current: new Set(current) } : null;
     this.renderHighlights();
+  }
+
+  // ---- links to other notes ------------------------------------------------------------------------
+
+  /** A page's links: areas made with Link, and text boxes that name a notebook as [[Name]]. */
+  linksOf(pageId: string): { x: number; y: number; w: number; h: number; nb: string; page?: string | number; typed?: boolean }[] {
+    const p = this.session.pages.find((q) => q.id === pageId);
+    const out: { x: number; y: number; w: number; h: number; nb: string; page?: string | number; typed?: boolean }[] = (p?.links ?? []).map((l) => ({ ...l }));
+    const c = this.session.content(pageId);
+    if (c && this.cb.resolveNoteName)
+      for (const o of c.objects) {
+        if (o.type !== 'text' || !o.text.includes('[[')) continue;
+        for (const m of o.text.matchAll(/\[\[([^\]\n]{1,120})\]\]/g)) {
+          // [[Name]], [[Name#3]] (page 3 of it), [[#3]] (page 3 of this notebook)
+          const [, name, num] = /^(.*?)(?:#\s*(\d+))?\s*$/.exec(m[1]) ?? [];
+          const nb = name?.trim() ? this.cb.resolveNoteName(name) : this.session.id;
+          if (nb) {
+            out.push({ x: o.x, y: o.y, w: o.w, h: o.h, nb, page: num ? Number(num) : undefined, typed: true });
+            break; // one badge per text box (its first link)
+          }
+        }
+      }
+    return out;
+  }
+
+  /** Draws a page's links: a quiet outline over the area and a badge to tap (pen, mouse or touch). */
+  private renderLinks(v: PageView) {
+    v.links.replaceChildren();
+    v.links.dataset.done = '1';
+    const links = this.linksOf(v.page.id);
+    if (!links.length) return;
+    const m = pageMatrix(v.page, this.zoom);
+    for (const l of links) {
+      const cs = rectCorners(l.x, l.y, l.w, l.h, 0).map(([a, b]) => apply(m, a, b));
+      const xs = cs.map((c) => c[0]), ys = cs.map((c) => c[1]);
+      const x0 = Math.min(...xs), y0 = Math.min(...ys), x1 = Math.max(...xs), y1 = Math.max(...ys);
+      const area = document.createElement('div');
+      area.className = l.typed ? 'gi-link is-typed' : 'gi-link';
+      Object.assign(area.style, { left: `${x0 - 3}px`, top: `${y0 - 3}px`, width: `${x1 - x0 + 6}px`, height: `${y1 - y0 + 6}px` });
+      const title = this.cb.noteTitle?.(l.nb) ?? 'note';
+      const badge = document.createElement('button');
+      badge.type = 'button';
+      badge.className = 'gi-link-badge';
+      badge.title = `Open ${title}`;
+      badge.setAttribute('aria-label', `Open the linked note ${title}`);
+      badge.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>';
+      // the badge takes the press, so a pen tap on it never draws
+      badge.addEventListener('pointerdown', (e) => e.stopPropagation());
+      badge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.cb.onFollowLink?.(l.nb, l.page);
+      });
+      area.append(badge);
+      v.links.append(area);
+    }
   }
 
   // ---- "Select text": drag across PDF text, copy it ------------------------------------------------

@@ -3,12 +3,12 @@ import {
   PenTool, Pen, Brush, Highlighter, Eraser, Lasso, Shapes, Sticker, ImagePlus, Type, Bandage, Pointer, Mic, Undo2, Redo2, PanelRight, Search, Bookmark,
   FilePlus2, MoreHorizontal, Scissors, Copy, Trash2, CopyPlus, Palette, Camera, ScanText, Save, ArrowUpToLine, ArrowDownToLine,
   Presentation, FileDown, Printer, LayoutTemplate, Maximize, ZoomIn, ZoomOut, Eye, EyeOff, BookOpenCheck, Home, Sparkles, ScrollText,
-  ChevronLeft, ChevronRight, Keyboard, Square, Scaling, FileInput, X, TextSelect,
+  ChevronLeft, ChevronRight, Keyboard, Square, Scaling, FileInput, X, TextSelect, Link2,
 } from 'lucide-react';
 import type { PenKind, TextObject } from '../../shared/types';
 import { Viewport, hasClipboard, type Tool, type Selection } from '../engine/viewport';
 import type { NotebookSession } from '../engine/session';
-import { findSourcesFor, makeCardsFrom, useApp, getSession, setTools, updateSettings, openDialog, toast, activateTab, saveElements, insertPdfIntoNotebook, notePenUsed, penKnown } from '../lib/store';
+import { jumpToNote, notebookByName, setPageLinks, findSourcesFor, makeCardsFrom, useApp, getSession, setTools, updateSettings, openDialog, toast, activateTab, saveElements, insertPdfIntoNotebook, notePenUsed, penKnown } from '../lib/store';
 import { api } from '../lib/api';
 import { extOf, modKey, uid } from '../lib/util';
 import { IconButton, Menu, Popover, Segmented, Swatch, Spinner, Button, type MenuItem } from '../ui/primitives';
@@ -18,6 +18,7 @@ import { addPage, toggleBookmark } from './pageOps';
 import { printNotebook } from './EditorDialogs';
 import { pageDataUrl } from '../engine/export';
 import { TextFormat } from './TextFormat';
+import { LinkNoteDialog } from './LinkNote';
 import { strokeToJSON, objectBBox } from '../engine/model';
 import { bboxUnion, type BBox } from '../engine/geometry';
 import type { LiveBridge } from '../live/ui/LiveLayer';
@@ -88,6 +89,9 @@ function EditorInner({ s, active }: { s: NotebookSession; active: boolean }) {
   const [sel, setSel] = useState<{ sel: Selection; anchor: DOMRect } | null>(null);
   // text selected on a PDF with the "Select text" tool, and where it is
   const [textSel, setTextSel] = useState<{ text: string; anchor: DOMRect } | null>(null);
+  // a selection being linked to another note ("Link" in the selection menu)
+  const [linkFor, setLinkFor] = useState<Selection | null>(null);
+  const jump = useApp((st) => st.jump);
   const [textObj, setTextObj] = useState<TextObject | null>(null);
   const [hist, setHist] = useState({ undo: false, redo: false });
   const [, setPagesVer] = useState(0);
@@ -110,7 +114,11 @@ function EditorInner({ s, active }: { s: NotebookSession; active: boolean }) {
       },
       onZoom: (z) => setZoom(z),
       onSelection: (sl, anchor) => setSel(sl && anchor ? { sel: sl, anchor } : null),
-      onTextEdit: (o) => setTextObj(o),
+      onTextEdit: (o) => {
+        setTextObj(o);
+        // a text box was closed: its [[Name]] links go into the backlink index
+        if (!o && vpRef.current) syncTypedLinks(s, vpRef.current);
+      },
       onRequestImage: (pageId, x, y) => void pickImage(v, pageId, [x, y]),
       onTempTool: (t) => useApp.setState({ tempTool: t }),
       onEraseEnd: () => setTools({ tool: prevTool.current === 'eraser' ? 'pen' : prevTool.current }),
@@ -120,6 +128,9 @@ function EditorInner({ s, active }: { s: NotebookSession; active: boolean }) {
       onInkContext: (pageId, x, y, cx, cy) => liveBridge.current.onInkContext?.(pageId, x, y, cx, cy),
       onAiRegion: (r) => liveBridge.current.onAiRegion?.(r),
       onTextSelect: (text, anchor) => setTextSel(text && anchor ? { text, anchor } : null),
+      resolveNoteName: (name) => notebookByName(name),
+      noteTitle: (nb) => useApp.getState().library.notebooks.find((n) => n.id === nb)?.title ?? 'note',
+      onFollowLink: (nb, page) => void jumpToNote(nb, page),
       onPenActivity: (pageId, x, y, down) => liveBridge.current.onPenActivity?.(pageId, x, y, down),
     });
     v.penSeen = penKnown;
@@ -136,6 +147,21 @@ function EditorInner({ s, active }: { s: NotebookSession; active: boolean }) {
       vpRef.current = null;
     };
   }, [s]);
+
+  // a link to this notebook was followed: go to its page (an id, or a page number from [[Name#3]])
+  useEffect(() => {
+    if (!jump || jump.nb !== s.id || !vp) return;
+    const idx = typeof jump.page === 'number' ? jump.page - 1 : jump.page ? s.pageIndex(jump.page) : -1;
+    useApp.setState({ jump: null });
+    if (typeof jump.page === 'number' && (idx < 0 || idx >= s.pages.length)) toast(`This notebook has no page ${jump.page}.`);
+    else if (idx >= 0) setTimeout(() => vp.scrollToPage(idx, true), 60);
+  }, [jump, vp, s]);
+  // [[Name]] links already in the notebook's text boxes go into the backlink index once it is open
+  useEffect(() => {
+    if (!vp) return;
+    const t = setTimeout(() => syncTypedLinks(s, vp), 2500);
+    return () => clearTimeout(t);
+  }, [vp, s]);
 
   useEffect(() => {
     if (!vp) return;
@@ -487,7 +513,19 @@ function EditorInner({ s, active }: { s: NotebookSession; active: boolean }) {
         {navOpen && <Navigator s={s} current={page} onGo={go} />}
       </div>
 
-      {sel && vp && active && <SelectionMenu vp={vp} sel={sel.sel} anchor={sel.anchor} />}
+      {sel && vp && active && <SelectionMenu vp={vp} sel={sel.sel} anchor={sel.anchor} onLink={() => setLinkFor(sel.sel)} />}
+      {linkFor && vp && (
+        <LinkNoteDialog
+          fromNb={s.id}
+          onClose={() => setLinkFor(null)}
+          onPick={(nb, page) => {
+            addLink(s, linkFor, nb, page);
+            vp.clearSelection();
+            setLinkFor(null);
+            toast('Linked. Tap the link badge to open it.');
+          }}
+        />
+      )}
       {textSel && vp && active && <TextSelMenu text={textSel.text} anchor={textSel.anchor} onDone={() => vp.clearTextSelection()} />}
       {vp && active && (
         <Suspense fallback={null}>
@@ -833,7 +871,25 @@ function CameraPopover({ anchor, onClose }: { anchor: DOMRect; onClose: () => vo
 
 // ---- selection menu -----------------------------------------------------------------------------
 
-function SelectionMenu({ vp, sel, anchor }: { vp: Viewport; sel: Selection; anchor: DOMRect }) {
+/** Links a selection's area to a notebook or page, and keeps the library's backlink index in step. */
+function addLink(s: NotebookSession, sel: Selection, nb: string, page?: string) {
+  const [x0, y0, x1, y1] = sel.bbox;
+  const pages = s.pages.map((p) => (p.id === sel.pageId ? { ...p, links: [...(p.links ?? []), { id: uid(), x: x0, y: y0, w: x1 - x0, h: y1 - y0, nb, ...(page ? { page } : {}) }] } : p));
+  s.setPages(pages);
+  const p = pages.find((q) => q.id === sel.pageId)!;
+  setPageLinks(s.id, p.id, 'area', (p.links ?? []).map((l) => ({ nb: l.nb, page: l.page })));
+}
+
+/** [[Name]] links typed in the text boxes of the pages that are loaded, into the backlink index. */
+function syncTypedLinks(s: NotebookSession, vp: Viewport) {
+  for (const p of s.pages) {
+    if (!s.content(p.id)) continue; // not loaded: its entries stay as they were
+    const typed = vp.linksOf(p.id).filter((l) => l.typed);
+    setPageLinks(s.id, p.id, 'typed', typed.map((l) => ({ nb: l.nb, page: typeof l.page === 'number' && l.nb === s.id ? s.pages[l.page - 1]?.id : typeof l.page === 'string' ? l.page : undefined })));
+  }
+}
+
+function SelectionMenu({ vp, sel, anchor, onLink }: { vp: Viewport; sel: Selection; anchor: DOMRect; onLink: () => void }) {
   const [colors, setColors] = useState(false);
   const elements = useApp((st) => st.elements);
   const ref = useRef<HTMLDivElement>(null);
@@ -905,6 +961,7 @@ function SelectionMenu({ vp, sel, anchor }: { vp: Viewport; sel: Selection; anch
           })}
           {btn('Duplicate', <CopyPlus size={16} />, () => vp.duplicateSelection())}
           {btn('Delete', <Trash2 size={16} />, () => vp.deleteSelection(), true)}
+          {btn('Link', <Link2 size={16} />, onLink)}
           <span className="tb-sep" />
           {btn('Colour', <Palette size={16} />, () => setColors(true))}
           {btn('Bigger', <Scaling size={16} />, () => vp.resizeSelection(1.25))}

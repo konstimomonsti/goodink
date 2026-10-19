@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Cover, DiskScan, FileItem, Folder, Library, LinkItem, NotebookDoc, NotebookIndex, NotebookMeta, PageMeta, PdfObject, SavedElement, SearchWord, Settings, Template } from '../../shared/types';
+import type { LinkRef, Cover, DiskScan, FileItem, Folder, Library, LinkItem, NotebookDoc, NotebookIndex, NotebookMeta, PageMeta, PdfObject, SavedElement, SearchWord, Settings, Template } from '../../shared/types';
 import { DEFAULT_SETTINGS, PAGE_SIZES } from '../../shared/types';
 import { api } from './api';
 import { startMemoryManager } from './memory';
@@ -54,6 +54,9 @@ interface AppState {
   dark: boolean;
   pageOf: Record<string, number>;
   askStorage: boolean;
+  /** a link was followed: the editor of this notebook scrolls to the page, then clears it */
+  /** page: a page id, or a 1-based page number ([[Name#3]]) */
+  jump: { nb: string; page?: string | number; at: number } | null;
 }
 
 function toolsFrom(s: Settings): ToolState {
@@ -99,6 +102,7 @@ export const useApp = create<AppState>(() => ({
   dialog: null,
   dark: false,
   pageOf: {},
+  jump: null,
   askStorage: false,
 }));
 
@@ -560,6 +564,40 @@ export async function closeTab(id: string) {
 
 export function activateTab(id: string | null) {
   set({ active: id });
+}
+
+// ---- links between notes ----------------------------------------------------------------------------
+
+/** Replace what one page links to (of one kind) in the library-wide index, for backlinks. */
+export function setPageLinks(fromNb: string, fromPage: string, kind: LinkRef['kind'], targets: { nb: string; page?: string }[]) {
+  const old = get().library.noteLinks ?? [];
+  const kept = old.filter((r) => !(r.fromNb === fromNb && r.fromPage === fromPage && r.kind === kind));
+  const next = [...kept, ...targets.map((t) => ({ fromNb, fromPage, toNb: t.nb, ...(t.page ? { toPage: t.page } : {}), kind }))];
+  if (JSON.stringify(next) === JSON.stringify(old)) return;
+  setLibrary((l) => ({ ...l, noteLinks: next }));
+}
+
+/** What links to this notebook (and page): links to the page, and links to the whole notebook. */
+export function backlinksTo(nb: string, page?: string): LinkRef[] {
+  const alive = new Set(get().library.notebooks.filter((n) => !n.deletedAt).map((n) => n.id));
+  return (get().library.noteLinks ?? []).filter((r) => r.toNb === nb && alive.has(r.fromNb) && (!r.toPage || !page || r.toPage === page));
+}
+
+/** A notebook by name, for [[Name]] in typed text (case and spacing do not matter). */
+export function notebookByName(name: string): string | null {
+  const key = (t: string) => t.trim().toLowerCase().replace(/\s+/g, ' ');
+  const k = key(name);
+  return get().library.notebooks.find((n) => !n.deletedAt && key(n.title) === k)?.id ?? null;
+}
+
+/** Follow a link: open the notebook (or bring its tab forward) at the page. */
+export async function jumpToNote(nb: string, page?: string | number) {
+  if (!get().library.notebooks.some((n) => n.id === nb && !n.deletedAt)) {
+    toast('That note no longer exists.', { kind: 'error' });
+    return;
+  }
+  set({ jump: { nb, page, at: Date.now() } });
+  await openNotebook(nb);
 }
 
 // ---- creation -----------------------------------------------------------------------------------

@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bookmark, Plus, Copy, Trash2, RotateCw, LayoutTemplate, FileImage, ArrowUpToLine, ArrowDownToLine, ArrowUp, ArrowDown, ListTree, X } from 'lucide-react';
+import { Bookmark, Plus, Copy, Trash2, RotateCw, LayoutTemplate, FileImage, ArrowUpToLine, ArrowDownToLine, ArrowUp, ArrowDown, ListTree, X, Link2, CornerDownLeft } from 'lucide-react';
 import type { NotebookSession } from '../engine/session';
 import type { PageMeta } from '../../shared/types';
 import { displaySize, renderPageToCanvas } from '../engine/render';
 import { Menu, Segmented, IconButton, menuPoint, type MenuItem } from '../ui/primitives';
 import { addPage, deletePages, duplicatePages, movePages, rotatePages, toggleBookmark } from './pageOps';
-import { openDialog } from '../lib/store';
+import { backlinksTo, jumpToNote, openDialog, setPageLinks, useApp } from '../lib/store';
 import { uid } from '../lib/util';
 import { whenIdle } from '../lib/idle';
 
@@ -97,7 +97,7 @@ function Thumb({ s, page, index, current, picked, touchDrop, dragging, onClick, 
 }
 
 export function Navigator({ s, current, onGo }: { s: NotebookSession; current: number; onGo: (i: number) => void }) {
-  const [tab, setTab] = useState<'pages' | 'bookmarks' | 'outline'>('pages');
+  const [tab, setTab] = useState<'pages' | 'bookmarks' | 'outline' | 'links'>('pages');
   const [, force] = useState(0);
   const [picked, setPicked] = useState<number[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
@@ -171,6 +171,7 @@ export function Navigator({ s, current, onGo }: { s: NotebookSession; current: n
             { value: 'pages', label: 'Pages' },
             { value: 'bookmarks', label: 'Marks' },
             { value: 'outline', label: 'Outline' },
+            { value: 'links', label: 'Links' },
           ]}
         />
       </div>
@@ -310,6 +311,7 @@ export function Navigator({ s, current, onGo }: { s: NotebookSession; current: n
           </button>
         </div>
       )}
+      {tab === 'links' && <LinksTab s={s} current={current} onGo={onGo} />}
       {tab === 'bookmarks' && (
         <div className="nav-text">
           {bookmarks.length === 0 && <p className="muted small pad">Bookmark a page with Ctrl+B or the ribbon in the toolbar. Bookmarked pages are listed here.</p>}
@@ -362,5 +364,54 @@ export function Navigator({ s, current, onGo }: { s: NotebookSession; current: n
       )}
       {menu && <Menu {...menu} onClose={() => setMenu(null)} />}
     </aside>
+  );
+}
+
+/**
+ * Links of the page you are on: what it links to (open or remove), and every page in the library
+ * that links here ("Linked from", like Obsidian's backlinks).
+ */
+function LinksTab({ s, current, onGo }: { s: NotebookSession; current: number; onGo: (index: number) => void }) {
+  const notebooks = useApp((st) => st.library.notebooks);
+  useApp((st) => st.library.noteLinks); // re-render when links change
+  const page = s.pages[Math.min(current, s.pages.length - 1)];
+  const titleOf = (nb: string) => notebooks.find((n) => n.id === nb)?.title ?? 'A deleted note';
+  const go = (nb: string, pageId?: string) => {
+    if (nb === s.id && pageId) {
+      const i = s.pageIndex(pageId);
+      if (i >= 0) return onGo(i);
+    }
+    void jumpToNote(nb, pageId);
+  };
+  const out = page?.links ?? [];
+  const where = (nb: string, pageId?: string) => (nb === s.id ? (pageId ? `Page ${s.pageIndex(pageId) + 1}` : 'This notebook') : `${titleOf(nb)}${pageId ? ' · a page' : ''}`);
+  const remove = (id: string) => {
+    const pages = s.pages.map((p) => (p.id === page.id ? { ...p, links: (p.links ?? []).filter((l) => l.id !== id) } : p));
+    s.setPages(pages);
+    setPageLinks(s.id, page.id, 'area', (pages.find((p) => p.id === page.id)?.links ?? []).map((l) => ({ nb: l.nb, page: l.page })));
+  };
+  const back = page ? backlinksTo(s.id, page.id) : [];
+  return (
+    <div className="nav-text">
+      <p className="nav-section-label">On this page</p>
+      {!out.length && <p className="muted small pad">Select something with the lasso and choose Link, or type [[Notebook name]] or [[#3]] (page 3) in a text box.</p>}
+      {out.map((l) => (
+        <div key={l.id} className="nav-row link-row">
+          <button type="button" className="link-row-go" onClick={() => go(l.nb, l.page)}>
+            <Link2 size={14} /> {where(l.nb, l.page)}
+          </button>
+          <IconButton label="Remove link" onClick={() => remove(l.id)}>
+            <X size={14} />
+          </IconButton>
+        </div>
+      ))}
+      <p className="nav-section-label">Linked from</p>
+      {!back.length && <p className="muted small pad">No page links here yet.</p>}
+      {back.map((r, k) => (
+        <button key={k} type="button" className="nav-row" onClick={() => go(r.fromNb, r.fromPage)}>
+          <CornerDownLeft size={14} /> {r.fromNb === s.id ? `Page ${s.pageIndex(r.fromPage) + 1}` : titleOf(r.fromNb)}
+        </button>
+      ))}
+    </div>
   );
 }
