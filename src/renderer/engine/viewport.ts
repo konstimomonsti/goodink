@@ -308,7 +308,7 @@ export class Viewport {
   private selMatrix: Mat = IDENTITY;
   private textCaret: Range | null = null;
   private textEdit: { pageId: string; obj: TextObject; isNew: boolean; el: HTMLDivElement; before: PageContent } | null = null;
-  private highlights: { pageId: string; boxes: [number, number, number, number][] } | null = null;
+  private highlights: { pageId: string; boxes: [number, number, number, number][]; current: Set<number> } | null = null;
   private unsub: () => void;
   private ro: ResizeObserver;
   scrollDir: 'vertical' | 'horizontal' = 'vertical';
@@ -3255,8 +3255,9 @@ export class Viewport {
 
   // ---- search highlights --------------------------------------------------------------------
 
-  setHighlights(pageId: string | null, boxes: [number, number, number, number][]) {
-    this.highlights = pageId ? { pageId, boxes } : null;
+  /** Marks boxes on a page (search matches); `current` are the indices of the match in focus. */
+  setHighlights(pageId: string | null, boxes: [number, number, number, number][], current: number[] = []) {
+    this.highlights = pageId ? { pageId, boxes, current: new Set(current) } : null;
     this.renderHighlights();
   }
 
@@ -3266,11 +3267,11 @@ export class Viewport {
     const v = this.views.get(this.highlights.pageId);
     if (!v) return;
     const m = pageMatrix(v.page, this.zoom);
-    for (const [x, y, w, h] of this.highlights.boxes) {
+    for (const [k, [x, y, w, h]] of this.highlights.boxes.entries()) {
       const corners = rectCorners(x, y, w, h, 0).map(([a, b]) => apply(m, a, b));
       const xs = corners.map((c) => c[0]), ys = corners.map((c) => c[1]);
       const d = document.createElement('div');
-      d.className = 'gi-mark';
+      d.className = this.highlights.current.has(k) ? 'gi-mark is-current' : 'gi-mark';
       d.style.left = `${Math.min(...xs) - 2}px`;
       d.style.top = `${Math.min(...ys) - 2}px`;
       d.style.width = `${Math.max(...xs) - Math.min(...xs) + 4}px`;

@@ -374,6 +374,31 @@ export class NotebookSession implements Sources {
     return out;
   }
 
+  /**
+   * Every occurrence of the query on a page, in reading order: the query's words as consecutive
+   * words ("dual system" matches only where "dual" is followed by "system"), each occurrence one
+   * match with the boxes of its words.
+   */
+  findMatches(pageId: string, q: string): [number, number, number, number][][] {
+    const pi = this.index.pages[pageId];
+    const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!pi || !terms.length) return [];
+    const norm = (t: string) => t.toLowerCase();
+    const out: [number, number, number, number][][] = [];
+    for (const words of [pi.typed, pi.pdf, pi.ocr]) {
+      for (let i = 0; i + terms.length <= words.length; i++) {
+        let ok = true;
+        for (let j = 0; j < terms.length && ok; j++) {
+          const w = norm(words[i + j].t);
+          // inner words must match whole (minus punctuation); the ends may be partial ("ink" in "goodink")
+          ok = terms.length === 1 ? w.includes(terms[0]) : j === 0 ? w.endsWith(terms[j]) || w.replace(/\W+$/, '').endsWith(terms[j]) : j === terms.length - 1 ? w.startsWith(terms[j]) : w.replace(/^\W+|\W+$/g, '') === terms[j];
+        }
+        if (ok) out.push(words.slice(i, i + terms.length).map((w) => w.b));
+      }
+    }
+    return out;
+  }
+
   searchDoc(q: string): { pageId: string; pageNumber: number; snippet: string; source: string }[] {
     const needle = q.trim().toLowerCase();
     if (!needle) return [];

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, X, Mic, Square, Play, Pause, Trash2, Plus, ChevronUp, ChevronDown } from 'lucide-react';
 import type { NotebookSession } from '../engine/session';
 import type { Viewport } from '../engine/viewport';
@@ -16,20 +16,39 @@ export function SearchPanel({ s, vp, onClose, initial }: { s: NotebookSession; v
   const [q, setQ] = useState(initial ?? '');
   const [i, setI] = useState(0);
   const results = q.trim().length >= 1 ? s.searchDoc(q) : [];
-  const go = (k: number) => {
-    const r = results[k];
-    if (!r || !vp) return;
-    setI(k);
-    const idx = s.pageIndex(r.pageId);
-    const boxes = s.findOnPage(r.pageId, q);
-    vp.scrollToPage(idx, true, boxes[0]?.[1]);
-    vp.setHighlights(r.pageId, boxes);
-  };
-  useEffect(() => () => vp?.setHighlights(null, []), [vp]);
-  useEffect(() => {
-    if (initial) setTimeout(() => go(0), 300);
+  // every occurrence, page by page in reading order: Enter and the arrows step through these
+  const matches = useMemo(
+    () => results.flatMap((r) => s.findMatches(r.pageId, q).map((boxes, k) => ({ pageId: r.pageId, boxes, k }))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    [q, results.map((r) => r.pageId).join()],
+  );
+  /** Jump to match k: scroll it into view and mark every match on its page, this one strongest. */
+  const go = (k: number) => {
+    const m = matches[k];
+    if (!m || !vp) return;
+    setI(k);
+    const onPage = matches.filter((x) => x.pageId === m.pageId);
+    const boxes = onPage.flatMap((x) => x.boxes);
+    let at = 0;
+    for (const x of onPage) {
+      if (x === m) break;
+      at += x.boxes.length;
+    }
+    vp.scrollToPage(s.pageIndex(m.pageId), true, Math.min(...m.boxes.map((b) => b[1])));
+    vp.setHighlights(m.pageId, boxes, m.boxes.map((_, j) => at + j));
+  };
+  const step = (d: number) => go((i + d + matches.length) % Math.max(1, matches.length));
+  useEffect(() => () => vp?.setHighlights(null, []), [vp]);
+  // jump to the first match while typing, once the typing pauses
+  useEffect(() => {
+    if (!q.trim()) {
+      vp?.setHighlights(null, []);
+      return;
+    }
+    const t = setTimeout(() => go(0), initial && q === initial ? 300 : 250);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, matches.length]);
   return (
     <aside className="panel" aria-label="Find in notebook">
       <header className="panel-head">
@@ -45,15 +64,16 @@ export function SearchPanel({ s, vp, onClose, initial }: { s: NotebookSession; v
             }}
             onKeyDown={(e) => {
               e.stopPropagation();
-              if (e.key === 'Enter') go(e.shiftKey ? (i - 1 + results.length) % Math.max(1, results.length) : (i + 1) % Math.max(1, results.length));
+              if (e.key === 'Enter') step(e.shiftKey ? -1 : 1);
               if (e.key === 'Escape') onClose();
             }}
           />
         </div>
-        <IconButton label="Previous match" onClick={() => go((i - 1 + results.length) % Math.max(1, results.length))} disabled={!results.length}>
+        {matches.length > 0 && <span className="hit-count" aria-live="polite">{i + 1} of {matches.length}</span>}
+        <IconButton label="Previous match" onClick={() => step(-1)} disabled={!matches.length}>
           <ChevronUp size={16} />
         </IconButton>
-        <IconButton label="Next match" onClick={() => go((i + 1) % Math.max(1, results.length))} disabled={!results.length}>
+        <IconButton label="Next match" onClick={() => step(1)} disabled={!matches.length}>
           <ChevronDown size={16} />
         </IconButton>
         <IconButton label="Close" onClick={onClose}>
@@ -65,7 +85,7 @@ export function SearchPanel({ s, vp, onClose, initial }: { s: NotebookSession; v
         <ul className="hit-list">
           {results.map((r, k) => (
             <li key={r.pageId}>
-              <button className={k === i ? 'is-on' : ''} onClick={() => go(k)}>
+              <button className={matches[i]?.pageId === r.pageId ? 'is-on' : ''} onClick={() => go(Math.max(0, matches.findIndex((m) => m.pageId === r.pageId)))}>
                 <span className="hit-title">
                   Page {r.pageNumber} <span className={`hit-src src-${r.source}`}>{r.source === 'ocr' ? 'handwriting' : r.source === 'pdf' ? 'PDF' : 'typed'}</span>
                 </span>

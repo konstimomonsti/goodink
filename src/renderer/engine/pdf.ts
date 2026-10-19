@@ -222,16 +222,25 @@ export async function pageWords(doc: PDFDocumentProxy, pageIndex: number): Promi
   const vp = page.getViewport({ scale: 1 });
   const tc = await page.getTextContent();
   const out: SearchWord[] = [];
+  // pdf.js gives a run of text (often a whole line) with its total width; each word's place in it is
+  // measured with the run's font family (proportional, so "i" and "m" differ), scaled to that width
+  const ctx = new OffscreenCanvas(1, 1).getContext('2d');
   for (const it of tc.items as any[]) {
     if (!it.str || !it.str.trim()) continue;
     const tx = pdfjs.Util.transform(vp.transform, it.transform);
     const fh = Math.hypot(tx[2], tx[3]) || 10;
     const x = tx[4], y = tx[5] - fh;
     const totalW = (it.width || it.str.length * fh * 0.5) * vp.scale;
-    const chars = it.str.length;
+    const family = (tc.styles as Record<string, { fontFamily?: string }>)[it.fontName]?.fontFamily ?? 'sans-serif';
+    if (ctx) ctx.font = `100px ${family}`;
+    const full = ctx?.measureText(it.str).width || 0;
+    const at = (n: number) => (full > 0 ? (ctx!.measureText(it.str.slice(0, n)).width / full) * totalW : (n / it.str.length) * totalW);
     let ci = 0;
     for (const word of it.str.split(/(\s+)/)) {
-      if (word.trim()) out.push({ t: word, b: [x + (ci / chars) * totalW, y, (word.length / chars) * totalW, fh * 1.15] });
+      if (word.trim()) {
+        const x0 = at(ci), x1 = at(ci + word.length);
+        out.push({ t: word, b: [x + x0, y, x1 - x0, fh * 1.15] });
+      }
       ci += word.length;
     }
   }

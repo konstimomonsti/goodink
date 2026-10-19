@@ -1185,3 +1185,7 @@ html, body { touch-action: pan-x pan-y; }
 .live-model-bar > span { display: block; height: 100%; background: var(--c-accent); transition: width 200ms linear; }
 .live-model-ok { color: var(--live-green); flex: none; }
 .live-model .btn { flex: none; white-space: nowrap; }
+
+/* ---- search: every match marked, the one in focus strongest ---- */
+.gi-mark.is-current { background: rgba(255, 150, 0, .42); border-color: rgba(214, 110, 0, 1); box-shadow: 0 0 0 3px rgba(255, 160, 0, .28); }
+.hit-count { font: 500 12px/1 var(--font-sans); color: var(--c-text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; padding: 0 2px; }
