@@ -32,6 +32,7 @@ Linear, not against "good enough".
 | Debug app | `cargo build` in `src-tauri`, giving `src-tauri/target/debug/goodink.exe`, which loads the dev server |
 | Drive the app | `node tests/drive-tauri.mjs <scenario.mjs> src-tauri/target/debug/goodink.exe` |
 | Release build | `npm run build` / `npm run dist` |
+| Android APK | `scripts/android-apk.sh` (signed arm64 release) or `scripts/android-apk.sh x86_64 debug` (emulator), into `builds/android/` |
 
 - **Driving the app**: each run gets a scratch library and WebView2 profile, so runs can go in
   parallel. The window is placed off-screen in test mode. Screenshots go to `tests/shots/`
@@ -40,6 +41,25 @@ Linear, not against "good enough".
   `tests/live/handwriting.mjs` writes realistic synthetic handwriting with real pen pointer events.
   `tests/live/mock-ai.mjs` is a configurable mock of the Anthropic and OpenAI-compatible APIs.
 - After Rust changes, rebuild the debug exe. Cargo serialises concurrent builds.
+
+### Android
+
+- Toolchain (outside the repo): JDK 17, SDK and NDK in `%LOCALAPPDATA%\Android`; emulator AVD
+  `goodink_tablet` (Pixel Tablet, x86_64). Drive it with `adb` from `Sdk\platform-tools`.
+- `tauri android build` stops at a symlink Windows refuses without Developer Mode;
+  `scripts/android-apk.sh` copies the library and runs Gradle instead.
+- The release signing key is `%LOCALAPPDATA%\goodink-android\release.keystore`. It is never
+  committed. Updates must be signed with the same key, so it must be backed up.
+- Desktop-only Rust is gated with `cfg(desktop)` and Windows-only with `cfg(windows)`. On Android:
+  - the profile lives in the app's private files folder;
+  - API keys are in a 0600 file there, not in a keyring;
+  - InkAnalyzer, Windows OCR, Windows dictation and the ONNX math reader are absent, so Smart
+    mode's cloud reading carries recognition;
+  - voice records the clip for cloud transcription.
+- The picker gives `content://` URIs: `api.openDialog` copies picked files into the cache
+  (`uri_import`), and exports to a URI go through a cache file (`uri_export`, `FilesPlugin.kt`).
+- The UI checks `isAndroid` (`lib/util.ts`), `api.canReveal` and `api.canPickFolder`.
+- pdf.js loads its legacy build when the WebView lacks iterator helpers (WebView < 122).
 
 ## Rules
 
