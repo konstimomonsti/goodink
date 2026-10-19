@@ -1,11 +1,16 @@
 // PDF loading and rendering through pdf.js. Documents are cached per asset; rendered page
 // bitmaps are cached LRU by (asset, page, resolution bucket).
-import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import legacyWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { SearchWord } from '../../shared/types';
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+// pdf.js needs iterator helpers and Promise.withResolvers (Chromium 122+). WebView2 always has them;
+// an Android tablet's WebView may be older, and then pdf.js's own legacy build is loaded instead
+const g = globalThis as unknown as { Iterator?: { prototype?: { map?: unknown } }; Promise: { withResolvers?: unknown } };
+const modern = typeof g.Iterator?.prototype?.map === 'function' && typeof g.Promise.withResolvers === 'function';
+const pdfjs: typeof import('pdfjs-dist') = modern ? await import('pdfjs-dist') : ((await import('pdfjs-dist/legacy/build/pdf.mjs')) as unknown as typeof import('pdfjs-dist'));
+pdfjs.GlobalWorkerOptions.workerSrc = modern ? workerUrl : legacyWorkerUrl;
 
 const base = new URL('./pdfjs/', document.baseURI).href;
 const DOC_OPTS = {
