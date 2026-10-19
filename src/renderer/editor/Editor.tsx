@@ -3,7 +3,7 @@ import {
   PenTool, Pen, Brush, Highlighter, Eraser, Lasso, Shapes, Sticker, ImagePlus, Type, Bandage, Pointer, Mic, Undo2, Redo2, PanelRight, Search, Bookmark,
   FilePlus2, MoreHorizontal, Scissors, Copy, Trash2, CopyPlus, Palette, Camera, ScanText, Save, ArrowUpToLine, ArrowDownToLine,
   Presentation, FileDown, Printer, LayoutTemplate, Maximize, ZoomIn, ZoomOut, Eye, EyeOff, BookOpenCheck, Home, Sparkles, ScrollText,
-  ChevronLeft, ChevronRight, Keyboard, Square, Scaling, FileInput, X,
+  ChevronLeft, ChevronRight, Keyboard, Square, Scaling, FileInput, X, TextSelect,
 } from 'lucide-react';
 import type { PenKind, TextObject } from '../../shared/types';
 import { Viewport, hasClipboard, type Tool, type Selection } from '../engine/viewport';
@@ -38,6 +38,7 @@ const TOOLS: { id: Tool; label: string; key: string; icon: ReactNode }[] = [
   { id: 'tape', label: 'Tape', key: 'U', icon: <Bandage size={19} /> },
   { id: 'laser', label: 'Laser pointer', key: 'K', icon: <Pointer size={19} /> },
   { id: 'ai', label: 'Circle and ask AI', key: 'A', icon: <Sparkles size={19} /> },
+  { id: 'textsel', label: 'Select text (copy from PDFs)', key: 'X', icon: <TextSelect size={19} /> },
 ];
 
 const TAPE_COLORS = ['#7d9cff', '#5ad08f', '#ffb44a', '#ff8fb1', '#a0a0ab'];
@@ -85,6 +86,8 @@ function EditorInner({ s, active }: { s: NotebookSession; active: boolean }) {
   const [panel, setPanel] = useState<null | 'search' | 'elements' | 'audio' | 'ask'>(null);
   const [searchInit, setSearchInit] = useState<string | undefined>();
   const [sel, setSel] = useState<{ sel: Selection; anchor: DOMRect } | null>(null);
+  // text selected on a PDF with the "Select text" tool, and where it is
+  const [textSel, setTextSel] = useState<{ text: string; anchor: DOMRect } | null>(null);
   const [textObj, setTextObj] = useState<TextObject | null>(null);
   const [hist, setHist] = useState({ undo: false, redo: false });
   const [, setPagesVer] = useState(0);
@@ -116,6 +119,7 @@ function EditorInner({ s, active }: { s: NotebookSession; active: boolean }) {
       onPenSeen: () => notePenUsed(),
       onInkContext: (pageId, x, y, cx, cy) => liveBridge.current.onInkContext?.(pageId, x, y, cx, cy),
       onAiRegion: (r) => liveBridge.current.onAiRegion?.(r),
+      onTextSelect: (text, anchor) => setTextSel(text && anchor ? { text, anchor } : null),
       onPenActivity: (pageId, x, y, down) => liveBridge.current.onPenActivity?.(pageId, x, y, down),
     });
     v.penSeen = penKnown;
@@ -137,6 +141,7 @@ function EditorInner({ s, active }: { s: NotebookSession; active: boolean }) {
     if (!vp) return;
     vp.tools = { ...tools, tool: tools.tool };
     if (tools.tool !== 'lasso' && tools.tool !== 'image' && tools.tool !== 'text') vp.clearSelection();
+    if (tools.tool !== 'textsel') vp.clearTextSelection();
     if (tools.tool !== 'text' && vp.isEditingText) vp.commitTextEdit();
   }, [vp, tools]);
 
@@ -279,6 +284,7 @@ function EditorInner({ s, active }: { s: NotebookSession; active: boolean }) {
       if (mod) {
         if (k === 'z' && !e.shiftKey) return handled(), undo();
         if ((k === 'z' && e.shiftKey) || k === 'y') return handled(), redo();
+        if (k === 'c' && vp.selectedText) return handled(), void copyText(vp.selectedText);
         if (k === 'c') return vp.sel && (handled(), vp.copySelection());
         if (k === 'x') return vp.sel && (handled(), vp.cutSelection());
         if (k === 'v') return handled(), void vp.paste().then((ok) => ok && setTools({ tool: 'lasso' }));
@@ -424,7 +430,7 @@ function EditorInner({ s, active }: { s: NotebookSession; active: boolean }) {
           )}
           <span className="live-slot" ref={setLiveSlot} />
           <button type="button" className={`tb-ask ${panel === 'ask' ? 'is-active' : ''}`} title="Ask AI about this notebook (Ctrl+J)" aria-pressed={panel === 'ask'} onClick={() => setPanel(panel === 'ask' ? null : 'ask')}>
-            <Sparkles size={16} /> Ask AI
+            <Sparkles size={16} /> <span className="tb-ask-label">Ask AI</span>
           </button>
           <IconButton label="Find in notebook" shortcut="Ctrl+F" active={panel === 'search'} onClick={() => setPanel(panel === 'search' ? null : 'search')}>
             <Search size={18} />
@@ -482,6 +488,7 @@ function EditorInner({ s, active }: { s: NotebookSession; active: boolean }) {
       </div>
 
       {sel && vp && active && <SelectionMenu vp={vp} sel={sel.sel} anchor={sel.anchor} />}
+      {textSel && vp && active && <TextSelMenu text={textSel.text} anchor={textSel.anchor} onDone={() => vp.clearTextSelection()} />}
       {vp && active && (
         <Suspense fallback={null}>
           <LiveLayer vp={vp} s={s} slot={liveSlot} bridge={liveBridge} pageId={curPage.id} />
@@ -922,6 +929,30 @@ function SelectionMenu({ vp, sel, anchor }: { vp: Viewport; sel: Selection; anch
           {btn('Done', <X size={16} />, () => vp.clearSelection())}
         </>
       )}
+    </div>
+  );
+}
+
+/** Copies text to the clipboard and says so. */
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(text.length > 60 ? `Copied ${text.split(/\s+/).length} words` : `Copied “${text}”`);
+  } catch {
+    toast('Could not copy to the clipboard.', { kind: 'error' });
+  }
+}
+
+/** Over text selected on a PDF: Copy (also Ctrl+C). Sits above the selection, or below without room. */
+function TextSelMenu({ text, anchor, onDone }: { text: string; anchor: DOMRect; onDone: () => void }) {
+  const top = anchor.top > 70 ? anchor.top - 56 : anchor.bottom + 8;
+  const left = Math.max(8, Math.min(window.innerWidth - 120, anchor.left + anchor.width / 2 - 56));
+  return (
+    <div className="sel-menu" style={{ top, left }} role="toolbar" aria-label="Selected text" onPointerDown={(e) => e.stopPropagation()}>
+      <button className="sel-btn" onClick={() => void copyText(text).then(onDone)} title="Copy (Ctrl+C)">
+        <Copy size={18} />
+        <span>Copy</span>
+      </button>
     </div>
   );
 }

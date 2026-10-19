@@ -374,6 +374,12 @@ export class NotebookSession implements Sources {
     return out;
   }
 
+  /** A page's selectable text words with their boxes, in reading order: the PDF's, then typed text. */
+  textWords(pageId: string): { t: string; b: [number, number, number, number] }[] {
+    const pi = this.index.pages[pageId];
+    return pi ? [...pi.pdf, ...pi.typed] : [];
+  }
+
   /**
    * Every occurrence of the query on a page, in reading order: the query's words as consecutive
    * words ("dual system" matches only where "dual" is followed by "system"), each occurrence one

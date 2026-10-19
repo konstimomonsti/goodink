@@ -21,7 +21,7 @@ import { renderDecorations, hitDecoration, tipAnchor } from '../live/ui/decorati
 import type { UiDecoration } from '../live/ui/engineApi';
 import { LIVE_TUNING } from '../live/ui/tuning';
 
-export type Tool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'shape' | 'text' | 'image' | 'tape' | 'laser' | 'ai';
+export type Tool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'shape' | 'text' | 'image' | 'tape' | 'laser' | 'ai' | 'textsel';
 
 /** A loop drawn with the AI selector: polygon in page units (flat x, y pairs) and its box. */
 export interface AiRegion {
@@ -85,6 +85,8 @@ export interface ViewportCallbacks {
   onTempTool(tool: Tool | null): void;
   onEraseEnd(): void;
   onLaser(page: number, pts: { x: number; y: number; t: number }[]): void;
+  /** "Select text" tool: the words selected on a PDF page (null when cleared), and where they are on screen */
+  onTextSelect?(text: string | null, anchor: DOMRect | null): void;
   onToast(msg: string): void;
   /** first pen contact (smart pen detection) */
   onPenSeen?(): void;
@@ -1417,6 +1419,9 @@ export class Viewport {
         break;
       case 'ai':
         this.action = this.aiAction(e, i, pageId);
+        break;
+      case 'textsel':
+        this.action = this.textSelAction(e, i, pageId);
         break;
     }
   }
@@ -3261,8 +3266,92 @@ export class Viewport {
     this.renderHighlights();
   }
 
+  // ---- "Select text": drag across PDF text, copy it ------------------------------------------------
+
+  private textSel: { pageId: string; boxes: [number, number, number, number][]; text: string } | null = null;
+
+  /** The words between the press and the pointer, in reading order, selected (blue) as the pen moves. */
+  private textSelAction(e: PointerEvent, i: number, pageId: string): Action {
+    const words = this.session.textWords(pageId);
+    const none: Action = { move() {}, up() {}, cancel() {} };
+    if (!words.length) {
+      this.clearTextSelection();
+      this.cb.onToast('There is no PDF or typed text here to select.');
+      return none;
+    }
+    // the word under the point, else the nearest (a line counts more than a column)
+    const nearest = (ev: { clientX: number; clientY: number }) => {
+      const [px, py] = this.pagePointFromEvent(i, ev);
+      let best = 0, bestD = Infinity;
+      for (let k = 0; k < words.length; k++) {
+        const [x, y, w, h] = words[k].b;
+        const d = Math.max(x - px, 0, px - x - w) + 2 * Math.max(y - py, 0, py - y - h);
+        if (d < bestD) [best, bestD] = [k, d];
+      }
+      return best;
+    };
+    const a = nearest(e);
+    let b = a;
+    const show = () => {
+      const [lo, hi] = a <= b ? [a, b] : [b, a];
+      const sel = words.slice(lo, hi + 1);
+      // words on one line are joined by spaces, a new line where the next word sits lower
+      let text = '';
+      sel.forEach((w, k) => {
+        if (k) text += w.b[1] > sel[k - 1].b[1] + sel[k - 1].b[3] * 0.6 ? '\n' : ' ';
+        text += w.t;
+      });
+      this.textSel = { pageId, boxes: sel.map((w) => w.b), text };
+      this.renderHighlights();
+    };
+    show();
+    return {
+      move: (ev) => {
+        const k = nearest(ev);
+        if (k !== b) {
+          b = k;
+          show();
+        }
+      },
+      up: () => {
+        const sel = this.textSel;
+        if (!sel) return;
+        const xs = sel.boxes.flatMap((q) => [q[0], q[0] + q[2]]), ys = sel.boxes.flatMap((q) => [q[1], q[1] + q[3]]);
+        this.cb.onTextSelect?.(sel.text, this.pageRectToClient(pageId, [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]));
+      },
+      cancel: () => this.clearTextSelection(),
+    };
+  }
+
+  /** The text selected with the "Select text" tool, if any. */
+  get selectedText(): string {
+    return this.textSel?.text ?? '';
+  }
+
+  clearTextSelection() {
+    if (!this.textSel) return;
+    this.textSel = null;
+    this.renderHighlights();
+    this.cb.onTextSelect?.(null, null);
+  }
+
   private renderHighlights() {
     for (const v of this.views.values()) v.marks.replaceChildren();
+    const sel = this.textSel && this.views.get(this.textSel.pageId);
+    if (sel && this.textSel) {
+      const m = pageMatrix(sel.page, this.zoom);
+      for (const [x, y, w, h] of this.textSel.boxes) {
+        const cs = rectCorners(x, y, w, h, 0).map(([a, b]) => apply(m, a, b));
+        const xs = cs.map((c) => c[0]), ys = cs.map((c) => c[1]);
+        const d = document.createElement('div');
+        d.className = 'gi-textsel';
+        d.style.left = `${Math.min(...xs) - 1}px`;
+        d.style.top = `${Math.min(...ys)}px`;
+        d.style.width = `${Math.max(...xs) - Math.min(...xs) + 2}px`;
+        d.style.height = `${Math.max(...ys) - Math.min(...ys)}px`;
+        sel.marks.append(d);
+      }
+    }
     if (!this.highlights) return;
     const v = this.views.get(this.highlights.pageId);
     if (!v) return;
