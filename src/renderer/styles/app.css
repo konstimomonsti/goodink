@@ -172,7 +172,7 @@ select.input { padding-right: 4px; }
 .continue-body h2 { font: var(--t-xl); letter-spacing: -.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .continue-actions { margin-top: auto; display: flex; gap: var(--s-3); }
 
-.lib-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--c-bg); }
+.lib-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--c-bg); }
 .lib-head { display: flex; align-items: center; gap: var(--s-5); padding: var(--s-7) var(--s-8) var(--s-4); }
 .lib-title { flex: 1; min-width: 0; }
 .lib-title h1 { font: 700 20px/28px var(--font-display); letter-spacing: -.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1204,3 +1204,27 @@ html, body { touch-action: pan-x pan-y; }
   .tool-btn { width: 36px; }
   .tb-sep { margin: 0 3px; }
 }
+
+/* ---- links between notes ---- */
+.gi-links { position: absolute; inset: 0; pointer-events: none; }
+.gi-link { position: absolute; border: 1.5px dashed color-mix(in srgb, var(--c-accent) 55%, transparent); border-radius: 6px; pointer-events: none; }
+.gi-link.is-typed { border-style: dotted; }
+.gi-link-badge { position: absolute; top: -11px; right: -11px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; pointer-events: auto; cursor: pointer; background: var(--c-accent); color: var(--c-on-accent); box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform var(--m-fast); touch-action: manipulation; }
+.gi-link-badge:hover { transform: scale(1.12); }
+.gi-link-badge:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
+.nav-section-label { margin: 12px 12px 4px; font: 600 11px/1 var(--font-sans); letter-spacing: .04em; text-transform: uppercase; color: var(--c-text-muted); }
+.link-row { display: flex; align-items: center; gap: 4px; padding-right: 4px; }
+.link-row-go { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* "Link to a note" dialog */
+.link-note { display: flex; flex-direction: column; gap: 10px; }
+.link-note-search { width: 100%; }
+.link-note-list { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow: auto; border: 1px solid var(--c-border); border-radius: var(--r-md); }
+.link-note-list button { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 10px; text-align: left; color: var(--c-text); }
+.link-note-list button:hover { background: var(--c-hover); }
+.link-note-list button.is-on { background: var(--c-accent-soft); color: var(--c-accent); }
+.link-note-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.link-note-tag { font: 500 11px/1 var(--font-sans); color: var(--c-text-muted); }
+.link-note-meta { font: 400 12px/1 var(--font-sans); color: var(--c-text-muted); white-space: nowrap; }
+.link-note-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; max-height: 120px; overflow: auto; }
+.link-note-chips button { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border-radius: var(--r-pill); border: 1px solid var(--c-border); font: 500 12.5px/1 var(--font-sans); color: var(--c-text); }
+.link-note-chips button.is-on { background: var(--c-accent); border-color: var(--c-accent); color: var(--c-on-accent); }
