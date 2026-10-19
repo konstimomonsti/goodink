@@ -14,7 +14,7 @@ import { extractDisplay, mathParts, mathToPlain, MathHtml, renderParts, RichText
 import { Button, Field, IconButton, Modal, Segmented, Spinner } from '../ui/primitives';
 import { LiveSettingsSection } from '../live/ui/StatusPill';
 import {
-  PROVIDERS, PROVIDER_IDS, DEFAULT_AI, FREE_PROVIDER, FREE_KEY_URL, withDefaults, PAGES_PER_REQUEST, choiceFrom, readyProviders, listModels, saveKey, removeKey, savedKeys, aiError, generateSummary, chat, ASK_SYSTEM, MAX_ASK_PAGES,
+  PROVIDERS, PROVIDER_IDS, DEFAULT_AI, cleanModel, FREE_PROVIDER, FREE_KEY_URL, withDefaults, PAGES_PER_REQUEST, choiceFrom, readyProviders, listModels, saveKey, removeKey, savedKeys, aiError, generateSummary, chat, ASK_SYSTEM, MAX_ASK_PAGES,
   type AiChoice, type AiSettings, type Card, type PageImage, type ProviderId, type Turn,
 } from '../lib/ai';
 
@@ -85,7 +85,7 @@ export function ModelPicker({ value, onChange: set, providers }: { value: AiChoi
       </Field>
       <Field label="Model" hint={error || (loading ? 'Loading the provider’s models…' : `${models.length} model${models.length === 1 ? '' : 's'} available. You can also type a model ID.`)}>
         <span className="ai-model-row">
-          <input className="input" list={listId} value={value.model} placeholder="Model ID" onChange={(e) => onChange({ ...value, model: e.target.value.trim() })} spellCheck={false} />
+          <input className="input" list={listId} value={value.model} placeholder="Model ID" onChange={(e) => onChange({ ...value, model: cleanModel(e.target.value) })} spellCheck={false} />
           <datalist id={listId}>
             {models.map((m) => (
               <option key={m} value={m} />

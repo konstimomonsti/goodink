@@ -67,9 +67,12 @@ export interface AiChoice {
   baseURL?: string;
 }
 
+/** Model IDs never contain whitespace; a stray space ("gemini- 3.5-flash-lite") makes the provider reject the request. */
+export const cleanModel = (m: string) => m.replace(/\s+/g, '');
+
 export const choiceFrom = (ai: AiSettings, provider = ai.provider): AiChoice => ({
   provider,
-  model: ai.models[provider] ?? PROVIDERS[provider].models[0] ?? '',
+  model: cleanModel(ai.models[provider] ?? PROVIDERS[provider].models[0] ?? ''),
   effort: ai.efforts[provider] ?? '',
   baseURL: ai.baseURLs[provider],
 });
