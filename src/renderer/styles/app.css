@@ -1156,7 +1156,7 @@ html, body { touch-action: pan-x pan-y; }
 .live-voice-btn { height: 32px; padding: 0 12px 0 10px; border-radius: var(--r-pill); border: 1px solid var(--c-border); background: var(--c-surface); display: inline-flex; align-items: center; gap: 6px; font: 600 13px/1 var(--font-sans); color: var(--c-text); transition: background var(--m-fast), color var(--m-fast); touch-action: none; }
 .live-voice-btn:hover:not(:disabled) { background: var(--c-surface-2); color: var(--c-text); }
 .live-voice-label { min-width: 74px; text-align: left; }
-@media (max-width: 1100px) { .live-voice-label { display: none; } .live-voice-btn { width: 32px; padding: 0; justify-content: center; } }
+@media (max-width: 1500px) { .live-voice-label { display: none; } .live-voice-btn { width: 32px; padding: 0; justify-content: center; } }
 .live-voice-btn.is-on, .live-voice-btn.is-on:hover:not(:disabled) { color: var(--c-on-accent); background: var(--c-accent); border-color: var(--c-accent); animation: live-voice-rec 1.5s ease-out infinite; }
 @keyframes live-voice-rec { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c-accent) 40%, transparent); } to { box-shadow: 0 0 0 8px transparent; } }
 .live-voice-pop { position: absolute; top: calc(100% + 8px); right: -8px; z-index: 60; display: flex; align-items: center; gap: 10px; width: max-content; min-width: 220px; max-width: 360px; padding: 8px 12px; border-radius: var(--r-lg); border: 1px solid var(--c-border); background: var(--c-surface); box-shadow: var(--sh-pop); }
@@ -1189,3 +1189,18 @@ html, body { touch-action: pan-x pan-y; }
 /* ---- search: every match marked, the one in focus strongest ---- */
 .gi-mark.is-current { background: rgba(255, 150, 0, .42); border-color: rgba(214, 110, 0, 1); box-shadow: 0 0 0 3px rgba(255, 160, 0, .28); }
 .hit-count { font: 500 12px/1 var(--font-sans); color: var(--c-text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; padding: 0 2px; }
+
+/* ---- "Select text" on PDFs ---- */
+.gi-textsel { position: absolute; background: color-mix(in srgb, var(--c-accent) 26%, transparent); border-radius: 2px; pointer-events: none; }
+
+/* the right-hand toolbar group gives way step by step instead of sliding over the tools */
+@media (max-width: 1400px) {
+  .live-pill-meta { display: none; }
+  .tb-ask-label { display: none; }
+  .tb-ask { padding: 0 9px; }
+  .tool-btn { width: 40px; }
+}
+@media (max-width: 1180px) {
+  .tool-btn { width: 36px; }
+  .tb-sep { margin: 0 3px; }
+}

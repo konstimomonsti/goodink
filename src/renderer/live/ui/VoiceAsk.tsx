@@ -3,7 +3,7 @@
 // and tap again to send. What you said goes to the block you are writing (the one under the pen or
 // written in the last few seconds), or to what is on screen when there is none.
 import { useRef, useState } from 'react';
-import { Mic, Square } from 'lucide-react';
+import { AudioLines, Square } from 'lucide-react';
 import { useMic } from './useMic';
 import { LIVE_TUNING as T } from './tuning';
 import type { LiveUiEngine } from './engineApi';
@@ -56,7 +56,7 @@ export function VoiceAsk({ engine, onAsk, onListening }: { engine: LiveUiEngine 
           else begin();
         }}
       >
-        {recording ? <Square size={11} fill="currentColor" strokeWidth={0} /> : <Mic size={16} />}
+        {recording ? <Square size={11} fill="currentColor" strokeWidth={0} /> : <AudioLines size={16} />}
         <span className="live-voice-label">{recording ? 'Listening…' : 'Ask by voice'}</span>
       </button>
       {(recording || busy) && (
