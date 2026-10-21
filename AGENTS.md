@@ -53,8 +53,10 @@ Linear, not against "good enough".
 - Desktop-only Rust is gated with `cfg(desktop)` and Windows-only with `cfg(windows)`. On Android:
   - the profile lives in the app's private files folder;
   - API keys are in a 0600 file there, not in a keyring;
-  - InkAnalyzer, Windows OCR, Windows dictation and the ONNX math reader are absent, so Smart
-    mode's cloud reading carries recognition;
+  - InkAnalyzer, Windows OCR and Windows dictation are absent;
+  - the ONNX math reader (Pix2Text) is the only local reader. Its runtime comes from Gradle's
+    `onnxruntime-android`, about +18 MB per ABI. Test it with `node tests/android/hmer.mjs`
+    against a running debug APK;
   - voice records the clip for cloud transcription.
 - The picker gives `content://` URIs: `api.openDialog` copies picked files into the cache
   (`uri_import`), and exports to a URI go through a cache file (`uri_export`, `FilesPlugin.kt`).
