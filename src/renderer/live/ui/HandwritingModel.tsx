@@ -1,11 +1,13 @@
 // The free on-device math reader (Pix2Text MFR 1.5, MIT): shows whether it is installed and
 // downloads it on request (120 MB, once, checksum-verified by the backend). Until then the built-in
-// Windows recogniser reads alone, and in Smart the cloud model reads what it is unsure of.
+// Windows recogniser reads alone (on Android nothing reads locally), and in Smart the cloud model
+// reads what it is unsure of.
 import { useEffect, useState } from 'react';
 import { Check, Download } from 'lucide-react';
 import { api } from '../../lib/api';
 import { recheckModel } from '../recog';
 import { Button } from '../../ui/primitives';
+import { isAndroid } from '../../lib/util';
 
 type State = 'checking' | 'missing' | 'installing' | 'ready' | 'error';
 
@@ -56,7 +58,7 @@ export function HandwritingModel() {
         <span className="live-model-line">
           {state === 'ready'
             ? 'Installed. Reads handwritten formulas on this device, offline.'
-            : `Pix2Text MFR, free (MIT). Reads handwritten formulas far better than the built-in recogniser, offline.${bytes ? ` ${mb(bytes)}, once.` : ''}`}
+            : `Pix2Text MFR, free (MIT). ${isAndroid ? 'Reads handwritten formulas on this tablet, offline, so maths is checked without the cloud.' : 'Reads handwritten formulas far better than the built-in recogniser, offline.'}${bytes ? ` ${mb(bytes)}, once.` : ''}`}
         </span>
         {state === 'installing' && (
           <span className="live-model-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={bytes ? Math.round((done / bytes) * 100) : 0}>

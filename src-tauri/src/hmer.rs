@@ -116,8 +116,12 @@ fn ort_init() -> Res<String> {
         if let Ok(w) = std::env::var("SystemRoot") {
             cands.push(Path::new(&w).join("System32").join("onnxruntime.dll"));
         }
+        // Android: the APK carries libonnxruntime.so (Gradle's onnxruntime-android); the linker finds
+        // it by name in the app's own libraries, which are not files on disk
+        #[cfg(target_os = "android")]
+        cands.push(PathBuf::from("libonnxruntime.so"));
         let mut errs = vec![];
-        for c in cands.iter().filter(|c| c.exists()) {
+        for c in cands.iter().filter(|c| c.exists() || cfg!(target_os = "android") && c.is_relative()) {
             match ort::init_from(c) {
                 Ok(b) => {
                     b.with_name("goodink-hmer").commit();
