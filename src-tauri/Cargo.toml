@@ -1,6 +1,6 @@
 [package]
 name = "goodink"
-version = "3.2.0"
+version = "3.2.1"
 description = "Handwritten notes and PDF annotation for Windows pen devices"
 authors = ["goodink"]
 edition = "2021"
