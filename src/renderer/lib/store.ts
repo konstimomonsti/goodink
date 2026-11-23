@@ -756,14 +756,19 @@ export async function importBackup(path: string) {
   }
 }
 
+export const ONENOTE_EXTS = ['onepkg', 'onetoc2', 'one'];
+const isOneNote = (p: string) => /\.(onepkg|onetoc2|one)$/i.test(p);
+
 export async function openFiles(paths: string[]) {
   const pdfs = paths.filter((p) => /\.pdf$/i.test(p));
   const imgs = paths.filter((p) => /\.(png|jpe?g|webp|gif|bmp)$/i.test(p));
   const backups = paths.filter((p) => /\.gink$/i.test(p));
-  const other = paths.filter((p) => !pdfs.includes(p) && !imgs.includes(p) && !backups.includes(p));
+  const onenote = paths.filter(isOneNote);
+  const other = paths.filter((p) => !pdfs.includes(p) && !imgs.includes(p) && !backups.includes(p) && !onenote.includes(p));
   for (const p of pdfs) await importPdfFile(p);
   if (imgs.length) await importImageFiles(imgs);
   for (const b of backups) await importBackup(b);
+  for (const o of onenote) await importOneNote(o);
   if (other.length) await addFiles(other);
 }
 
@@ -773,7 +778,7 @@ export async function addFiles(paths: string[], folderId: string | null = get().
     const added = await api.fileImport(paths, folderId);
     await refreshFromDisk();
     if (get().settings.filesView !== 'all') updateSettings({ filesView: 'all' });
-    const where = folderId ? get().library.folders.find((f) => f.id === folderId)?.title : 'Files';
+    const where = folderId ? get().library.folders.find((f) => f.id === folderId)?.title : 'Home';
     toast(`Added ${added.length} file${added.length === 1 ? '' : 's'} to ${where}`, { kind: 'success' });
   } catch (e) {
     toast(`Could not add the files: ${e}`, { kind: 'error' });
@@ -817,14 +822,61 @@ export async function pickAndImport() {
   const files = await api.openDialog({
     title: 'Import',
     filters: [
-      { name: 'Supported files', extensions: ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'gink'] },
+      { name: 'Supported files', extensions: ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'gink', ...ONENOTE_EXTS] },
       { name: 'PDF', extensions: ['pdf'] },
+      { name: 'OneNote', extensions: ONENOTE_EXTS },
       { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] },
       { name: 'goodink backup', extensions: ['gink'] },
     ],
     multi: true,
   });
   if (files.length) await openFiles(files);
+}
+
+/**
+ * Import a OneNote notebook (.onepkg, or the .onetoc2 in its folder) or one section (.one). The
+ * notebook becomes a folder here, section groups folders in it, each section a notebook in the
+ * section's colour and each OneNote page one infinite canvas page (Rust: onenote.rs).
+ */
+export async function importOneNote(path: string, folderId: string | null = get().folderId) {
+  const tid = toast(`Importing ${baseName(path)} from OneNote…`, { progress: 0 });
+  const un = await api.onOnenoteProgress((p) => updateToast(tid, { progress: p.done / Math.max(1, p.total) }));
+  try {
+    await flushEverything();
+    const r = await api.onenoteImport(path, folderId);
+    saving = saving.then(() => applyDisk(r.scan));
+    await saving;
+    const made = new Map(r.notebooks.map((n) => [n.id, n]));
+    // scanned notebooks get default covers: give them their section's colour and OneNote's dates
+    setLibrary((l) => ({
+      ...l,
+      folders: l.folders.map((f) => (f.id === r.top && r.notebooks[0]?.color ? { ...f, color: r.notebooks[0].color } : f)),
+      notebooks: l.notebooks.map((n) => {
+        const m = made.get(n.id);
+        return m ? { ...n, cover: { style: 'solid', color: m.color ?? '#2f5b8a' }, createdAt: m.created, updatedAt: m.updated, openedAt: 0 } : n;
+      }),
+    }));
+    saveLibraryNow();
+    dismissToast(tid);
+    const n = r.notebooks.length;
+    const top = r.top;
+    const open = top ? () => showSection('all', top) : n === 1 ? () => void openNotebook(r.notebooks[0].id) : undefined;
+    const skipped = r.warnings.length ? ` · ${r.warnings.length} part${r.warnings.length === 1 ? '' : 's'} could not be read` : '';
+    toast(`Imported ${n} section${n === 1 ? '' : 's'} from OneNote${skipped}`, { kind: r.warnings.length ? 'info' : 'success', action: open ? { label: 'Open', run: open } : undefined, ms: 7000 });
+    return r;
+  } catch (e) {
+    dismissToast(tid);
+    toast(`Could not import ${baseName(path)}: ${(e as Error).message ?? e}`, { kind: 'error', ms: 8000 });
+    return null;
+  } finally {
+    un();
+  }
+}
+
+/** Library menu: pick a OneNote notebook or section to import into the folder you are in. */
+export async function pickOneNote() {
+  const files = await api.openDialog({ title: 'Import from OneNote', filters: [{ name: 'OneNote notebook or section', extensions: ONENOTE_EXTS }] });
+  for (const f of files) await importOneNote(f);
 }
 
 const PDF_FILTER = [{ name: 'PDF documents', extensions: ['pdf'] }];

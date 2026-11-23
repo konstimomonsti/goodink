@@ -2,13 +2,13 @@ import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 're
 import {
   BookOpen, Star, Clock, Trash2, Folder as FolderIcon, FolderPlus, Plus, Search, Settings as SettingsIcon, Upload, LayoutGrid, List, ArrowUpDown,
   MoreHorizontal, FileUp, Pencil, Copy, FolderInput, Archive, Lock, Unlock, RotateCcw, XCircle, FileDown, Palette, Zap, ChevronRight, X, ScrollText, GraduationCap, Link as LinkIcon, MonitorPlay, ExternalLink, Sparkles, Globe, Play,
-  File as FileIcon, FileText, FileImage, FileVideo, FileAudio, FileArchive, FileSpreadsheet, FileCode, Presentation, FolderOpen, Files,
+  File as FileIcon, FileText, FileImage, FileVideo, FileAudio, FileArchive, FileSpreadsheet, FileCode, Presentation, FolderOpen, Files, Home, NotebookTabs,
 } from 'lucide-react';
 import type { FileItem, Folder, LinkItem, NotebookMeta, SearchHit } from '../../shared/types';
 import {
   useApp, showSection, openNotebook, openDialog, toggleFavorite, trashItems, restoreItems, deleteForever, duplicateNotebook, exportBackup, pickAndImport,
   quickNote, pickPdfs, makeCardsFrom, findSourcesFor, openLink, studyFolder, createFolder, moveItems, sortNotebooks, updateSettings, emptyTrash, confirmDialog, setLock, removeLock, askPassword, toast, type Section,
-  FILE_ID, openLibraryFile, pickFiles, importImageFiles, filePath,
+  FILE_ID, openLibraryFile, pickFiles, importImageFiles, filePath, pickOneNote,
 } from '../lib/store';
 import { api } from '../lib/api';
 import { formatDate } from '../lib/util';
@@ -22,7 +22,8 @@ const StudyApp = lazy(() => import('../study/StudyApp').then((m) => ({ default: 
 const FindSourcesDialog = lazy(() => import('../study/FindSources').then((m) => ({ default: m.FindSourcesDialog })));
 
 const SECTIONS: { id: Section; label: string; icon: ReactNode }[] = [
-  { id: 'all', label: 'Files', icon: <FolderIcon size={17} /> },
+  // the home folder: every notebook lives in it (Settings → Home folder says where on this PC)
+  { id: 'all', label: 'Home', icon: <Home size={17} /> },
   { id: 'favorites', label: 'Favourites', icon: <Star size={17} /> },
   { id: 'recents', label: 'Recents', icon: <Clock size={17} /> },
   { id: 'study', label: 'Study', icon: <GraduationCap size={17} /> },
@@ -67,6 +68,7 @@ function TopBar() {
         } },
         { separator: true, label: '' },
         { label: 'Import PDF or images…', icon: <Upload size={15} />, shortcut: 'Ctrl+O', run: () => void pickAndImport() },
+        { label: 'Import from OneNote…', icon: <NotebookTabs size={15} />, run: () => void pickOneNote() },
         { label: 'Link or YouTube video…', icon: <LinkIcon size={15} />, run: () => setAdding('link') },
         { label: 'Add files…', icon: <Files size={15} />, run: () => void pickFiles() },
         { separator: true, label: '' },
@@ -150,7 +152,7 @@ function FolderStrip() {
     <div className="folder-strip" role="toolbar" aria-label="Folders">
       <span className="folder-strip-label">Folders</span>
       <button className={`chip ${!folderId ? 'is-active' : ''}`} aria-pressed={!folderId} onClick={() => showSection('all')}>
-        All<span className="chip-count">{total}</span>
+        <Home size={13} /> Home<span className="chip-count">{total}</span>
       </button>
       {roots.map((f) => (
         <FolderChip key={f.id} folder={f} active={top?.id === f.id} />
@@ -287,7 +289,7 @@ function LibraryMain() {
     };
   }, [library, section, folderId, query, settings.sort, settings.filesView]);
 
-  const title = query ? `Results for “${query}”` : folder ? folder.title : SECTIONS.find((s) => s.id === section)?.label ?? 'Files';
+  const title = query ? `Results for “${query}”` : folder ? folder.title : SECTIONS.find((s) => s.id === section)?.label ?? 'Home';
   const inTrash = section === 'trash' && !query;
 
   const pick = (id: string, e: React.MouseEvent) => {
@@ -437,7 +439,7 @@ function LibraryMain() {
         <div className="lib-title">
           {crumbs.length > 0 && !query ? (
             <nav className="crumbs" aria-label="Folder path">
-              <button onClick={() => showSection('all')}>Files</button>
+              <button onClick={() => showSection('all')}>Home</button>
               {crumbs.map((c, i) => (
                 <span key={c.id}>
                   <ChevronRight size={14} />
@@ -464,7 +466,7 @@ function LibraryMain() {
           {section === 'all' && !query && (
             <>
               {api.canReveal && (
-                <IconButton label="Show in Explorer" onClick={() => void api.reveal(folderId ? { id: folderId } : {})}>
+                <IconButton label={folderId ? 'Show in Explorer' : 'Open the home folder in Explorer'} onClick={() => void api.reveal(folderId ? { id: folderId } : {})}>
                   <FolderOpen size={17} />
                 </IconButton>
               )}

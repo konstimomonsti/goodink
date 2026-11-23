@@ -98,7 +98,18 @@ fn library_root() -> PathBuf {
     if let Ok(p) = std::env::var("GOODINK_LIBRARY") {
         return PathBuf::from(p);
     }
-    profile_dir().join("library")
+    // the hidden library of older installs stays where it is
+    let old = profile_dir().join("library");
+    if old.exists() || cfg!(target_os = "android") {
+        return old;
+    }
+    home_folder().unwrap_or(old)
+}
+
+/// A new install's home folder: "goodink" in Documents, where it can be seen and backed up.
+fn home_folder() -> Option<PathBuf> {
+    let docs = std::env::var("USERPROFILE").ok().map(|u| PathBuf::from(u).join("Documents")).filter(|d| d.is_dir())?;
+    Some(docs.join("goodink"))
 }
 
 /// Problems a user can send us. Never fails.

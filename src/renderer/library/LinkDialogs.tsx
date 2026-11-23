@@ -8,7 +8,7 @@ import { youtubeId, youtubeInfo, youtubeUrl } from '../study/youtube';
 export function AddLinkDialog({ folderId, onClose }: { folderId: string | null; onClose: () => void }) {
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
-  const where = folderPath(folderId).map((f) => f.title).join(' / ') || 'Files';
+  const where = folderPath(folderId).map((f) => f.title).join(' / ') || 'Home';
   const add = async () => {
     let u = url.trim();
     if (!/^https?:\/\//i.test(u)) u = `https://${u}`;

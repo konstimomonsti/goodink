@@ -105,7 +105,7 @@ export function FindSourcesDialog({ notebookId, topic: initialTopic, folderId, o
       addLink(f.kind === 'youtube' ? { kind: 'youtube', title: f.title, url: f.url, author: f.source, folderId: dest } : { kind: 'link', title: f.title, url: f.url, folderId: dest });
       n++;
     }
-    const where = folderPath(dest).map((x) => x.title).join(' / ') || 'Files';
+    const where = folderPath(dest).map((x) => x.title).join(' / ') || 'Home';
     toast(n ? `Saved ${n} source${n === 1 ? '' : 's'} to ${where}` : 'Those sources are already in your library', { kind: n ? 'success' : 'info', action: n ? { label: 'Show', run: () => showSection(useApp.getState().section === 'study' ? 'study' : 'all', dest) } : undefined });
     onClose();
   };

@@ -133,7 +133,7 @@ export function App() {
         <div className="tabs" role="tablist" aria-label="Open notebooks">
           <button role="tab" aria-selected={!active} className={`tab tab-home ${!active ? 'is-active' : ''}`} onClick={() => activateTab(null)} title="Library (Ctrl+Tab cycles tabs)">
             <BookOpen size={15} />
-            <span>Files</span>
+            <span>Home</span>
           </button>
           {tabs.map((id) => {
             const nb = library.notebooks.find((n) => n.id === id) ?? library.links?.find((x) => x.id === id);

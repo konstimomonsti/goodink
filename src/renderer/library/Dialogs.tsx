@@ -299,13 +299,13 @@ export function SettingsDialog() {
         {!isAndroid && <Toggle label="Make handwriting searchable" hint="Uses the text recognition built into Windows. Nothing leaves this PC." checked={s.ocrEnabled} onChange={(ocrEnabled) => updateSettings({ ocrEnabled })} />}
       </section>
       <section>
-        <h3>Storage</h3>
-        <p className="muted small">Your library is stored at</p>
+        <h3>Home folder</h3>
+        <p className="muted small">Every notebook is kept in your home folder, as its folders and notebooks only (goodink's own files are hidden).</p>
         <code className="path">{path}</code>
         <div className="row">
           {api.canReveal && (
-            <Button size="sm" onClick={() => void api.revealFile(path + '\\library.json')}>
-              Show in Explorer
+            <Button size="sm" onClick={() => void api.reveal({})}>
+              Open home folder
             </Button>
           )}
           {api.canPickFolder && (
@@ -316,7 +316,7 @@ export function SettingsDialog() {
                 if (dir) await changeLibraryFolder(dir);
               }}
             >
-              Move library… (e.g. into OneDrive)
+              Move home folder… (e.g. into OneDrive)
             </Button>
           )}
           <Button size="sm" onClick={() => openDialog({ type: 'backup', folderId: null })}>
@@ -393,7 +393,7 @@ export function StorageDialog() {
     <div className="scrim">
       <div className="modal modal-md storage" role="dialog" aria-modal="true" aria-label="Choose where to save your notebooks">
         <header className="modal-head">
-          <h2>Where should your notebooks be saved?</h2>
+          <h2>Where should your home folder be?</h2>
         </header>
         <div className="modal-body">
           <p className="muted">All notebooks, imported PDFs, images and recordings are kept in one folder on this PC. Pick a OneDrive or Dropbox folder if you want them backed up or available on another computer.</p>
@@ -414,7 +414,7 @@ export function StorageDialog() {
             </Button>
           )}
           <p className="muted small" style={{ marginTop: 16 }}>
-            You can change this later in Settings → Storage.{folder ? ' Your existing notebooks are copied over.' : ''}
+            You can change this later in Settings → Home folder.{folder ? ' Your existing notebooks are copied over.' : ''}
           </p>
         </div>
         <footer className="modal-foot">

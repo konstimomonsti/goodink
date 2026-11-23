@@ -336,7 +336,7 @@ impl PageOut {
                     let x = f.offset_horizontal().unwrap_or(0.0) * PT_PER_HALF_INCH;
                     let y = f.offset_vertical().unwrap_or(0.0) * PT_PER_HALF_INCH;
                     let style = Style { size: 11.0, bold: false, italic: true, underline: false, color: "#5b6270".into() };
-                    self.text_box(&format!("📎 {}", f.filename()), x, y, 300.0, &style);
+                    self.text_box(&format!("Attachment: {}", f.filename()), x, y, 300.0, &style);
                 }
                 _ => {}
             }
@@ -409,7 +409,7 @@ impl PageOut {
                 Content::EmbeddedFile(f) => {
                     flush(self, &mut block, &mut y);
                     let style = Style { size: 11.0, bold: false, italic: true, underline: false, color: "#5b6270".into() };
-                    y = self.text_box(&format!("📎 {}", f.filename()), x, y, w, &style) + 4.0;
+                    y = self.text_box(&format!("Attachment: {}", f.filename()), x, y, w, &style) + 4.0;
                 }
                 _ => {}
             }
