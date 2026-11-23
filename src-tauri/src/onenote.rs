@@ -239,7 +239,7 @@ fn colorref(c: u32) -> String {
 }
 
 /// A picture's file type, from its first bytes (OneNote does not always say).
-fn image_ext(b: &[u8]) -> Option<&'static str> {
+pub(crate) fn image_ext(b: &[u8]) -> Option<&'static str> {
     if b.starts_with(b"\x89PNG") {
         Some("png")
     } else if b.starts_with(&[0xff, 0xd8, 0xff]) {

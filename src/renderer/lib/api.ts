@@ -191,7 +191,7 @@ export const api = {
   },
   openDialog: async (opts: { title?: string; filters: Filter[]; multi?: boolean }): Promise<string[]> => {
     // Android's picker filters by MIME type, and .gink has none: a backup is a zip (or unknown bytes)
-    const filters = isAndroid ? opts.filters.map((f) => ({ ...f, extensions: f.extensions.flatMap((e) => (e === 'gink' ? ['application/zip', 'application/octet-stream'] : [e])) })) : opts.filters;
+    const filters = isAndroid ? opts.filters.map((f) => ({ ...f, extensions: f.extensions.flatMap((e) => (e === 'gink' || e === 'goodnotes' ? ['application/zip', 'application/octet-stream'] : [e])) })) : opts.filters;
     const r = await openDlg({ title: opts.title, filters, multiple: !!opts.multi, directory: false });
     return Promise.all((r == null ? [] : Array.isArray(r) ? r : [r]).map(localPath));
   },
@@ -274,6 +274,8 @@ export const api = {
   backupKind: (file: string): Promise<{ kind: 'notebook' | 'folder' | 'library'; title?: string; created?: string; count?: number }> => invoke('backup_kind', { file }),
   onenoteImport: (file: string, folder: string | null): Promise<{ scan: DiskScan; top: string | null; path: string | null; folders: { id: string; color: string | null }[]; notebooks: { id: string; title: string; created: number; updated: number; color: string | null }[]; warnings: string[] }> =>
     invoke('onenote_import', { file, folder }),
+  goodnotesImport: (file: string, folder: string | null): Promise<{ scan: DiskScan; id: string | null; title: string; pages: number; warnings: string[] }> =>
+    invoke('goodnotes_import', { file, folder }),
   onOnenoteProgress: (fn: (p: { done: number; total: number }) => void): Promise<UnlistenFn> => listen<{ done: number; total: number }>('onenote:progress', (e) => fn(e.payload)),
   onBackupProgress: (fn: (p: { done: number; total: number }) => void): Promise<UnlistenFn> => listen<{ done: number; total: number }>('backup:progress', (e) => fn(e.payload)),
   pendingOpen: (): Promise<string[]> => invoke('pending_open'),

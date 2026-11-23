@@ -2,13 +2,13 @@ import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 're
 import {
   BookOpen, Star, Clock, Trash2, Folder as FolderIcon, FolderPlus, Plus, Search, Settings as SettingsIcon, Upload, LayoutGrid, List, ArrowUpDown,
   MoreHorizontal, FileUp, Pencil, Copy, FolderInput, Archive, Lock, Unlock, RotateCcw, XCircle, FileDown, Palette, Zap, ChevronRight, X, ScrollText, GraduationCap, Link as LinkIcon, MonitorPlay, ExternalLink, Sparkles, Globe, Play,
-  File as FileIcon, FileText, FileImage, FileVideo, FileAudio, FileArchive, FileSpreadsheet, FileCode, Presentation, FolderOpen, Files, Home, NotebookTabs,
+  File as FileIcon, FileText, FileImage, FileVideo, FileAudio, FileArchive, FileSpreadsheet, FileCode, Presentation, FolderOpen, Files, Home, NotebookTabs, BookCopy,
 } from 'lucide-react';
 import type { FileItem, Folder, LinkItem, NotebookMeta, SearchHit } from '../../shared/types';
 import {
   useApp, showSection, openNotebook, openDialog, toggleFavorite, trashItems, restoreItems, deleteForever, duplicateNotebook, exportBackup, pickAndImport,
   quickNote, pickPdfs, makeCardsFrom, findSourcesFor, openLink, studyFolder, createFolder, moveItems, sortNotebooks, updateSettings, emptyTrash, confirmDialog, setLock, removeLock, askPassword, toast, type Section,
-  FILE_ID, openLibraryFile, pickFiles, importImageFiles, filePath, pickOneNote,
+  FILE_ID, openLibraryFile, pickFiles, importImageFiles, filePath, pickOneNote, pickGoodnotes,
 } from '../lib/store';
 import { api } from '../lib/api';
 import { formatDate } from '../lib/util';
@@ -69,6 +69,7 @@ function TopBar() {
         { separator: true, label: '' },
         { label: 'Import PDF or images…', icon: <Upload size={15} />, shortcut: 'Ctrl+O', run: () => void pickAndImport() },
         { label: 'Import from OneNote…', icon: <NotebookTabs size={15} />, run: () => void pickOneNote() },
+        { label: 'Import from Goodnotes…', icon: <BookCopy size={15} />, run: () => void pickGoodnotes() },
         { label: 'Link or YouTube video…', icon: <LinkIcon size={15} />, run: () => setAdding('link') },
         { label: 'Add files…', icon: <Files size={15} />, run: () => void pickFiles() },
         { separator: true, label: '' },

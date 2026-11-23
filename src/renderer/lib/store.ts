@@ -758,17 +758,20 @@ export async function importBackup(path: string) {
 
 export const ONENOTE_EXTS = ['onepkg', 'onetoc2', 'one'];
 const isOneNote = (p: string) => /\.(onepkg|onetoc2|one)$/i.test(p);
+const isGoodnotes = (p: string) => /\.goodnotes$/i.test(p);
 
 export async function openFiles(paths: string[]) {
   const pdfs = paths.filter((p) => /\.pdf$/i.test(p));
   const imgs = paths.filter((p) => /\.(png|jpe?g|webp|gif|bmp)$/i.test(p));
   const backups = paths.filter((p) => /\.gink$/i.test(p));
   const onenote = paths.filter(isOneNote);
-  const other = paths.filter((p) => !pdfs.includes(p) && !imgs.includes(p) && !backups.includes(p) && !onenote.includes(p));
+  const goodnotes = paths.filter(isGoodnotes);
+  const other = paths.filter((p) => !pdfs.includes(p) && !imgs.includes(p) && !backups.includes(p) && !onenote.includes(p) && !goodnotes.includes(p));
   for (const p of pdfs) await importPdfFile(p);
   if (imgs.length) await importImageFiles(imgs);
   for (const b of backups) await importBackup(b);
   for (const o of onenote) await importOneNote(o);
+  for (const g of goodnotes) await importGoodnotes(g);
   if (other.length) await addFiles(other);
 }
 
@@ -822,9 +825,10 @@ export async function pickAndImport() {
   const files = await api.openDialog({
     title: 'Import',
     filters: [
-      { name: 'Supported files', extensions: ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'gink', ...ONENOTE_EXTS] },
+      { name: 'Supported files', extensions: ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'gink', 'goodnotes', ...ONENOTE_EXTS] },
       { name: 'PDF', extensions: ['pdf'] },
       { name: 'OneNote', extensions: ONENOTE_EXTS },
+      { name: 'Goodnotes', extensions: ['goodnotes'] },
       { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] },
       { name: 'goodink backup', extensions: ['gink'] },
     ],
@@ -874,6 +878,36 @@ export async function importOneNote(path: string, folderId: string | null = get(
   } finally {
     un();
   }
+}
+
+/**
+ * Import a Goodnotes notebook (a .goodnotes file: Goodnotes → Share → Export → Goodnotes) as one
+ * goodink notebook in the folder you are in: pages, paper or PDF backgrounds, handwriting,
+ * pictures and text (Rust: goodnotes.rs).
+ */
+export async function importGoodnotes(path: string, folderId: string | null = get().folderId) {
+  const tid = toast(`Importing ${baseName(path)} from Goodnotes…`, { progress: 0.1 });
+  try {
+    await flushEverything();
+    const r = await api.goodnotesImport(path, folderId);
+    saving = saving.then(() => applyDisk(r.scan));
+    await saving;
+    dismissToast(tid);
+    const left = r.warnings.length ? ` · ${r.warnings.join('; ')}` : '';
+    const id = r.id;
+    toast(`Imported “${r.title}” from Goodnotes: ${r.pages} page${r.pages === 1 ? '' : 's'}${left}`, { kind: r.warnings.length ? 'info' : 'success', action: id ? { label: 'Open', run: () => void openNotebook(id) } : undefined, ms: 7000 });
+    return r;
+  } catch (e) {
+    dismissToast(tid);
+    toast(`Could not import ${baseName(path)}: ${(e as Error).message ?? e}`, { kind: 'error', ms: 8000 });
+    return null;
+  }
+}
+
+/** Library menu: pick Goodnotes notebooks to import into the folder you are in. */
+export async function pickGoodnotes() {
+  const files = await api.openDialog({ title: 'Import from Goodnotes', filters: [{ name: 'Goodnotes notebook', extensions: ['goodnotes'] }], multi: true });
+  for (const f of files) await importGoodnotes(f);
 }
 
 /** Library menu: pick a OneNote notebook or section to import into the folder you are in. */
