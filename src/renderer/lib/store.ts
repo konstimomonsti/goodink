@@ -835,8 +835,8 @@ export async function pickAndImport() {
 
 /**
  * Import a OneNote notebook (.onepkg, or the .onetoc2 in its folder) or one section (.one). The
- * notebook becomes a folder here, section groups folders in it, each section a notebook in the
- * section's colour and each OneNote page one infinite canvas page (Rust: onenote.rs).
+ * notebook becomes a folder here, section groups and sections folders in it (in the section's
+ * colour), and each OneNote page its own notebook with one infinite canvas page (Rust: onenote.rs).
  */
 export async function importOneNote(path: string, folderId: string | null = get().folderId) {
   const tid = toast(`Importing ${baseName(path)} from OneNote…`, { progress: 0 });
@@ -847,10 +847,12 @@ export async function importOneNote(path: string, folderId: string | null = get(
     saving = saving.then(() => applyDisk(r.scan));
     await saving;
     const made = new Map(r.notebooks.map((n) => [n.id, n]));
+    const sections = new Map(r.folders.map((f) => [f.id, f.color]));
     // scanned notebooks get default covers: give them their section's colour and OneNote's dates
     setLibrary((l) => ({
       ...l,
-      folders: l.folders.map((f) => (f.id === r.top && r.notebooks[0]?.color ? { ...f, color: r.notebooks[0].color } : f)),
+      // section folders in their OneNote colours
+      folders: l.folders.map((f) => (sections.get(f.id) ? { ...f, color: sections.get(f.id)! } : f)),
       notebooks: l.notebooks.map((n) => {
         const m = made.get(n.id);
         return m ? { ...n, cover: { style: 'solid', color: m.color ?? '#2f5b8a' }, createdAt: m.created, updatedAt: m.updated, openedAt: 0 } : n;
@@ -862,7 +864,8 @@ export async function importOneNote(path: string, folderId: string | null = get(
     const top = r.top;
     const open = top ? () => showSection('all', top) : n === 1 ? () => void openNotebook(r.notebooks[0].id) : undefined;
     const skipped = r.warnings.length ? ` · ${r.warnings.length} part${r.warnings.length === 1 ? '' : 's'} could not be read` : '';
-    toast(`Imported ${n} section${n === 1 ? '' : 's'} from OneNote${skipped}`, { kind: r.warnings.length ? 'info' : 'success', action: open ? { label: 'Open', run: open } : undefined, ms: 7000 });
+    const secs = r.folders.length;
+    toast(`Imported ${n} page${n === 1 ? '' : 's'} in ${secs} section${secs === 1 ? '' : 's'} from OneNote${skipped}`, { kind: r.warnings.length ? 'info' : 'success', action: open ? { label: 'Open', run: open } : undefined, ms: 7000 });
     return r;
   } catch (e) {
     dismissToast(tid);

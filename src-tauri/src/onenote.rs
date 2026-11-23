@@ -1,7 +1,7 @@
 //! OneNote import. A OneNote notebook (a .onepkg package, the .onetoc2 in a notebook's folder, or a
 //! single .one section) becomes goodink folders and notebooks: the notebook is a folder, section
-//! groups are folders inside it, every section is a goodink notebook, and every OneNote page is one
-//! infinite canvas page in it. Handwriting becomes strokes, pictures and printouts become images,
+//! groups and sections are folders inside it, and every OneNote page is its own goodink notebook
+//! with one infinite canvas page. Handwriting becomes strokes, pictures and printouts become images,
 //! and typed text becomes text boxes, all where they were on the OneNote page.
 //!
 //! Like a folder restore (backup.rs), the result is written straight into the library's folders and
@@ -87,7 +87,7 @@ pub async fn onenote_import(app: AppHandle, file: String, folder: Option<String>
         // exclusive: nothing moves while the notebook is written and scanned
         let store = state.store.write().unwrap_or_else(|e| e.into_inner());
         let dest = folder_dir(&store, folder.as_deref())?;
-        let mut w = Writer { app: &app, done: 0, total: 0, made: vec![], warnings: vec![] };
+        let mut w = Writer { app: &app, done: 0, total: 0, made: vec![], folders: vec![], skipped: 0, warnings: vec![] };
         let top = match &source {
             Source::Notebook { title, entries, warnings } => {
                 w.warnings.extend(warnings.iter().cloned());
@@ -113,13 +113,16 @@ pub async fn onenote_import(app: AppHandle, file: String, folder: Option<String>
                 Some(m)
             })
             .collect();
+        let folders: Vec<Value> = w.folders.iter().filter_map(|(p, color)| Some(json!({ "id": store.id_at(p)?, "color": color }))).collect();
+        // a single section opens on its folder
+        let top = top.or_else(|| w.folders.first().map(|f| f.0.clone()));
         let top_id = top.as_ref().and_then(|t| store.id_at(t));
         let path = top.as_ref().map(|t| rel_of(&store.root, t));
         crate::log(&format!("OneNote import: {} notebooks from {file}, {} warnings", notebooks.len(), w.warnings.len()));
         for x in &w.warnings {
             crate::log(&format!("  OneNote: {x}"));
         }
-        Ok(json!({ "scan": scan, "top": top_id, "path": path, "notebooks": notebooks, "warnings": w.warnings }))
+        Ok(json!({ "scan": scan, "top": top_id, "path": path, "folders": folders, "notebooks": notebooks, "warnings": w.warnings }))
     })
     .await
     .map_err(err)?
@@ -131,6 +134,10 @@ struct Writer<'a> {
     total: usize,
     /// every notebook written: (its folder, { title, created, updated, color })
     made: Vec<(PathBuf, Value)>,
+    /// every section folder written, with the section's colour
+    folders: Vec<(PathBuf, Option<String>)>,
+    /// pictures of the last page that could not be shown
+    skipped: usize,
     warnings: Vec<String>,
 }
 
@@ -149,56 +156,57 @@ impl Writer<'_> {
         Ok(())
     }
 
-    /// One section: a goodink notebook with one infinite page per OneNote page.
+    /// One section: a folder in the section's colour, with one goodink notebook per OneNote page
+    /// (named after the page, one infinite canvas page each).
     fn section(&mut self, dir: &Path, s: &Section) -> Res<()> {
         let title = s.display_name().trim_end_matches(".one").to_string();
-        let nb = unique_in(dir, &format!("{}.{}", tree::file_name(&title), tree::NB_EXT));
-        let id = tree::new_id();
-        let mut pages = vec![];
-        let mut outline = vec![];
-        let mut assets = serde_json::Map::new();
-        let mut index = serde_json::Map::new();
-        let (mut created, mut updated) = (u64::MAX, 0u64);
+        let folder = unique_in(dir, &tree::file_name(&title));
+        fs::create_dir_all(&folder).map_err(err)?;
+        let color = s.color().map(|c| format!("#{:02x}{:02x}{:02x}", c.r(), c.g(), c.b()));
+        self.folders.push((folder.clone(), color.clone()));
         let all: Vec<&Page> = s.page_series().iter().flat_map(|p| p.pages()).collect();
         for (i, page) in all.iter().enumerate() {
-            let pid = tree::new_id();
-            let mut out = PageOut::default();
-            out.page(page);
-            for (aid, (ext, bytes)) in &out.assets {
-                let f = nb.join("assets").join(format!("{aid}.{ext}"));
-                if !f.exists() {
-                    write_atomic(&f, bytes)?;
-                }
-                assets.insert(aid.clone(), json!({ "ext": ext, "bytes": bytes.len() }));
-            }
-            if out.skipped > 0 {
-                self.warnings.push(format!("{title}, page {}: {} picture(s) in a format goodink cannot show", i + 1, out.skipped));
-            }
-            let (meta, content) = out.finish(&pid);
-            write_atomic(&nb.join("pages").join(format!("{pid}.json")), content.to_string().as_bytes())?;
-            index.insert(pid.clone(), json!({ "typed": out.typed, "pdf": [], "ocr": out.ocr, "ocrStamp": -1 }));
             let name = page.title_text().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).unwrap_or_else(|| format!("Page {}", i + 1));
-            outline.push(json!({ "id": tree::new_id(), "title": name, "pageId": pid }));
-            pages.push(meta);
-            created = created.min((page.created_time().unix_timestamp_nanos() / 1_000_000).max(0) as u64);
-            updated = updated.max((page.updated_time().unix_timestamp_nanos() / 1_000_000).max(0) as u64);
+            self.page_notebook(&folder, &name, page, &color)?;
+            if self.skipped > 0 {
+                self.warnings.push(format!("{title} / {name}: {} picture(s) in a format goodink cannot show", self.skipped));
+                self.skipped = 0;
+            }
             self.tick();
         }
-        if pages.is_empty() {
-            // an empty section is an empty notebook, ready to write in
-            let pid = tree::new_id();
-            write_atomic(&nb.join("pages").join(format!("{pid}.json")), json!({ "v": 1, "strokes": [], "objects": [] }).to_string().as_bytes())?;
-            pages.push(canvas_page(&pid, None));
+        if all.is_empty() {
             self.tick();
         }
-        let doc = json!({ "id": id, "pages": pages, "outline": outline, "recordings": [], "assets": assets });
+        Ok(())
+    }
+
+    /// One OneNote page as its own notebook in `dir`.
+    fn page_notebook(&mut self, dir: &Path, name: &str, page: &Page, color: &Option<String>) -> Res<()> {
+        let nb = unique_in(dir, &format!("{}.{}", tree::file_name(name), tree::NB_EXT));
+        let pid = tree::new_id();
+        let mut out = PageOut::default();
+        out.page(page);
+        let mut assets = serde_json::Map::new();
+        for (aid, (ext, bytes)) in &out.assets {
+            let f = nb.join("assets").join(format!("{aid}.{ext}"));
+            if !f.exists() {
+                write_atomic(&f, bytes)?;
+            }
+            assets.insert(aid.clone(), json!({ "ext": ext, "bytes": bytes.len() }));
+        }
+        self.skipped = out.skipped;
+        let (meta, content) = out.finish(&pid);
+        write_atomic(&nb.join("pages").join(format!("{pid}.json")), content.to_string().as_bytes())?;
+        let mut pages = serde_json::Map::new();
+        pages.insert(pid.clone(), json!({ "typed": out.typed, "pdf": [], "ocr": out.ocr, "ocrStamp": -1 }));
+        let index = json!({ "pages": pages });
+        let doc = json!({ "id": tree::new_id(), "pages": [meta], "outline": [], "recordings": [], "assets": assets });
         write_atomic(&nb.join("notebook.json"), doc.to_string().as_bytes())?;
-        write_atomic(&nb.join("index.json"), json!({ "pages": index }).to_string().as_bytes())?;
-        let color = s.color().map(|c| format!("#{:02x}{:02x}{:02x}", c.r(), c.g(), c.b()));
-        let now = chrono::Utc::now().timestamp_millis() as u64;
+        write_atomic(&nb.join("index.json"), index.to_string().as_bytes())?;
+        let ms = |t: i128| (t / 1_000_000).max(0) as u64;
         self.made.push((
             nb,
-            json!({ "title": title, "created": if created == u64::MAX { now } else { created }, "updated": if updated == 0 { now } else { updated }, "color": color }),
+            json!({ "title": name, "created": ms(page.created_time().unix_timestamp_nanos()), "updated": ms(page.updated_time().unix_timestamp_nanos()), "color": color }),
         ));
         Ok(())
     }
