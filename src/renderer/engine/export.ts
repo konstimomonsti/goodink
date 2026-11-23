@@ -151,8 +151,17 @@ export async function exportPdf(session: NotebookSession, opts: ExportOptions): 
         const lines = wrapText(o);
         const rect = (x: number, y: number, w: number, h: number) => `M${x},${y} L${x + w},${y} L${x + w},${y + h} L${x},${y + h} Z`;
         if (o.bgColor) page.drawSvgPath(rect(o.x - 2, o.y - 2, o.w + 4, o.h + 4), { ...svgAt(), color: hexRgb(o.bgColor), borderWidth: 0 });
-        lines.forEach((line, li) => {
-          const lw = f.widthOfTextAtSize(line, o.size);
+        lines.forEach((text, li) => {
+          // characters outside WinAnsi (the standard fonts' encoding: emoji, Greek …) cannot be
+          // measured or drawn: they become '?' rather than failing the whole export
+          let line = text;
+          let lw: number;
+          try {
+            lw = f.widthOfTextAtSize(line, o.size);
+          } catch {
+            line = line.replace(/[^\x20-\x7e\xa0-\xff]/g, '?');
+            lw = f.widthOfTextAtSize(line, o.size);
+          }
           const lx = o.align === 'left' ? o.x + 2 : o.align === 'center' ? o.x + (o.w - lw) / 2 : o.x + o.w - 2 - lw;
           const top = lineTop(o, li) + o.size * 0.08;
           const t = Math.max(0.8, o.size / 14);
