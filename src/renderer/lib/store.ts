@@ -3,7 +3,7 @@ import type { LinkRef, Cover, DiskScan, FileItem, Folder, Library, LinkItem, Not
 import { DEFAULT_SETTINGS, PAGE_SIZES } from '../../shared/types';
 import { api } from './api';
 import { startMemoryManager } from './memory';
-import { baseName, debounce, extOf, uid } from './util';
+import { baseName, debounce, extOf, joinPath, uid } from './util';
 import type { Tool, ToolState } from '../engine/viewport';
 import type { NotebookSession, SessionHooks } from '../engine/session';
 
@@ -797,7 +797,7 @@ export async function pickFiles() {
 
 let libraryRoot = '';
 /** Where a library file is on this PC. */
-export const filePath = (rel: string) => `${libraryRoot.replace(/[\\/]+$/, '')}\\${rel.replace(/\//g, '\\')}`;
+export const filePath = (rel: string) => joinPath(libraryRoot, rel);
 
 /**
  * Open a file of the library: a PDF opens in goodink to write on (a notebook next to it, made once),

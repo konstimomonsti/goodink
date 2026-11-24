@@ -13,7 +13,7 @@
     "windows": [],
     "withGlobalTauri": false,
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://gink.localhost https://i.ytimg.com; frame-src https://www.youtube-nocookie.com; media-src 'self' blob: mediastream: http://gink.localhost; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost http://gink.localhost blob: data:; font-src 'self' data:"
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://gink.localhost gink://localhost https://i.ytimg.com; frame-src https://www.youtube-nocookie.com; media-src 'self' blob: mediastream: http://gink.localhost gink://localhost; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost http://gink.localhost gink://localhost blob: data:; font-src 'self' data:"
     }
   },
   "bundle": {

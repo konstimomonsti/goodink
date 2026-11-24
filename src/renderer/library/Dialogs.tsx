@@ -7,7 +7,7 @@ import { api } from '../lib/api';
 import { Button, Field, Modal, Segmented, Toggle } from '../ui/primitives';
 import { CoverArt, COVER_COLORS, COVER_STYLES, TemplatePreview } from './CoverArt';
 import { TEMPLATE_LIST } from '../engine/templates';
-import { isWindows, platformName } from '../lib/util';
+import { isWindows, joinPath, platformName } from '../lib/util';
 // the AI section pulls in the provider SDKs, so it loads only when Settings opens
 const AiSettingsSection = lazy(() => import('../editor/AiDialogs').then((m) => ({ default: m.AiSettingsSection })));
 
@@ -319,7 +319,7 @@ export function SettingsDialog() {
                 if (dir) await changeLibraryFolder(dir);
               }}
             >
-              Move home folder… (e.g. into OneDrive)
+              Move home folder… (e.g. into {isWindows ? 'OneDrive' : 'Nextcloud or Dropbox'})
             </Button>
           )}
           <Button size="sm" onClick={() => openDialog({ type: 'backup', folderId: null })}>
@@ -387,7 +387,7 @@ export function StorageDialog() {
   useEffect(() => {
     void api.libraryInfo().then((i) => setCurrent(i.path));
   }, []);
-  const target = folder ? `${folder}\goodink Notebooks` : current;
+  const target = folder ? joinPath(folder, 'goodink Notebooks') : current;
   const confirm = async () => {
     setBusy(true);
     if (!(await changeLibraryFolder(folder))) setBusy(false);
@@ -399,7 +399,7 @@ export function StorageDialog() {
           <h2>Where should your home folder be?</h2>
         </header>
         <div className="modal-body">
-          <p className="muted">All notebooks, imported PDFs, images and recordings are kept in one folder on this PC. Pick a OneDrive or Dropbox folder if you want them backed up or available on another computer.</p>
+          <p className="muted">All notebooks, imported PDFs, images and recordings are kept in one folder on this {isWindows ? 'PC' : 'computer'}. Pick a {isWindows ? 'OneDrive or Dropbox' : 'Nextcloud or Dropbox'} folder if you want them backed up or available on another computer.</p>
           <Field label="Notebooks will be saved in">
             <code className="path">{target || '…'}</code>
           </Field>

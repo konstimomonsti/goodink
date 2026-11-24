@@ -56,4 +56,10 @@ export const isLinux = typeof navigator !== 'undefined' && /Linux|X11/i.test(nav
 /** The system's name in messages, and its file manager's name in "Show in …". */
 export const platformName = isAndroid ? 'Android' : isLinux ? 'Linux' : 'Windows';
 export const fileManager = isLinux ? 'Files' : 'Explorer';
+
+/** Join a path with the separator its base already uses: "/" on Linux and Android, "\" on Windows. */
+export function joinPath(base: string, ...parts: string[]) {
+  const sep = base.startsWith('/') ? '/' : '\\';
+  return [base.replace(/[\\/]+$/, ''), ...parts.map((p) => p.replace(/^[\\/]+|[\\/]+$/g, '').replace(/[\\/]+/g, sep))].join(sep);
+}
 export const modKey =(e: { ctrlKey: boolean; metaKey: boolean }) => e.ctrlKey || e.metaKey;

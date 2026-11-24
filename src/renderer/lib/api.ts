@@ -6,7 +6,7 @@ import { getCurrentWindow, availableMonitors, primaryMonitor } from '@tauri-apps
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getVersion } from '@tauri-apps/api/app';
 import { documentDir, join, tempDir } from '@tauri-apps/api/path';
-import { isAndroid } from './util';
+import { isAndroid, isWindows } from './util';
 import { open as openDlg, save as saveDlg } from '@tauri-apps/plugin-dialog';
 import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { writeImage, readImage } from '@tauri-apps/plugin-clipboard-manager';
@@ -15,8 +15,12 @@ import { DEFAULT_SETTINGS } from '../../shared/types';
 
 type Filter = { name: string; extensions: string[] };
 
-/** Files served straight from disk by the backend (gink:// protocol; Range requests supported). */
-const FILES = 'http://gink.localhost';
+/**
+ * Files served straight from disk by the backend (gink:// protocol; Range requests supported). Tauri
+ * serves a custom protocol at http://<scheme>.localhost on Windows and Android, and at
+ * <scheme>://localhost on Linux and macOS (WebKitGTK, WKWebView).
+ */
+const FILES = isWindows || isAndroid ? 'http://gink.localhost' : 'gink://localhost';
 type Channel = 'app:flush' | 'app:open-files' | 'present:frame' | 'present:laser' | 'present:closed';
 
 const parse = <T>(text: string | null, fallback: T): T => {

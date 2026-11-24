@@ -1,15 +1,19 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
-    "targets": ["deb"],
+    "targets": [
+      "deb"
+    ],
     "category": "Productivity",
     "longDescription": "Handwritten notes and PDF annotation for pen tablets and laptops.",
     "linux": {
       "deb": {
         "section": "editors",
         "files": {
-          "/usr/lib/goodink/libonnxruntime.so": "linux/libonnxruntime.so"
-        }
+          "/usr/lib/goodink/libonnxruntime.so": "linux/libonnxruntime.so",
+          "/usr/share/mime/packages/goodink.xml": "linux/goodink-mime.xml"
+        },
+        "desktopTemplate": "linux/goodink.desktop"
       }
     }
   }

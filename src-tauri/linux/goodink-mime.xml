@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- .gink: a goodink backup (a zip of a notebook, a folder or the whole library) -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-goodink-backup">
+    <comment>goodink backup</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.gink"/>
+    <icon name="goodink"/>
+  </mime-type>
+</mime-info>

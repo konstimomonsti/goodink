@@ -33,6 +33,7 @@ Linear, not against "good enough".
 | Drive the app | `node tests/drive-tauri.mjs <scenario.mjs> src-tauri/target/debug/goodink.exe` |
 | Release build | `npm run build` / `npm run dist` |
 | Android APK | `scripts/android-apk.sh` (signed arm64 release) or `scripts/android-apk.sh x86_64 debug` (emulator), into `builds/android/` |
+| Debian package | `scripts/linux-deb.sh` → `builds/linux/goodink_<version>_amd64.deb` (one-time setup: `scripts/linux-chroot.sh`) |
 
 - **Driving the app**: each run gets a scratch library and WebView2 profile, so runs can go in
   parallel. The window is placed off-screen in test mode. Screenshots go to `tests/shots/`
@@ -62,6 +63,26 @@ Linear, not against "good enough".
   (`uri_import`), and exports to a URI go through a cache file (`uri_export`, `FilesPlugin.kt`).
 - The UI checks `isAndroid` (`lib/util.ts`), `api.canReveal` and `api.canPickFolder`.
 - pdf.js loads its legacy build when the WebView lacks iterator helpers (WebView < 122).
+
+### Linux (Debian)
+
+- Built in a Debian 12 chroot (`/srv/bookworm`) inside WSL Debian, so the `.deb` runs on Debian 12,
+  13 and newer (glibc ≥ 2.34). `scripts/linux-deb.sh` builds the renderer on Windows, syncs the
+  sources in and builds on every core (`scripts/linux-build-inner.sh`: 16 codegen units, thin LTO).
+- Test on WSL Debian 13 as the user `tester` through WSLg. The app's WebKit inspector is enabled
+  with `WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9234`, and Node on Windows can drive it.
+- WebKitGTK differences:
+  - custom protocols are `gink://localhost`, not `http://gink.localhost` (`api.ts` FILES, CSP);
+  - no `requestIdleCallback` (`lib/polyfills.ts`);
+  - paths use `/` (`joinPath`);
+  - with NVIDIA's driver, `WEBKIT_DISABLE_DMABUF_RENDERER=1` is set (see `run()`).
+- On Linux:
+  - data lives in `~/.local/share/goodink`, and notebooks in the XDG Documents dir under `goodink`;
+  - API keys are in a 0600 file (`ai.rs` vault);
+  - ONNX Runtime ships in `/usr/lib/goodink`, from Microsoft's signed NuGet package with a pinned
+    sha256;
+  - there are no Windows recognisers, OCR or dictation.
+- Uncaught web errors go to `goodink.log` in the profile on every system (`client_log`).
 
 ## Rules
 

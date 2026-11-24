@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=goodink
+GenericName=Handwritten notes
+Comment=Handwritten notes and PDF annotation
+Exec=goodink %F
+Icon=goodink
+Terminal=false
+StartupWMClass=goodink
+Categories=Office;Education;
+Keywords=notes;handwriting;pen;stylus;pdf;annotate;math;
+MimeType=application/x-goodink-backup;application/pdf;
