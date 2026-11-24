@@ -10,3 +10,6 @@
 *.sh text eol=lf
 gradlew text eol=lf
 *.apk binary
+src-tauri/linux/*.desktop text eol=lf
+src-tauri/linux/*.xml text eol=lf
+*.deb binary
