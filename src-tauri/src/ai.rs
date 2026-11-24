@@ -1,12 +1,12 @@
-// AI provider plumbing. API keys live in the Windows Credential Manager (on Android, in a file in
-// the app's private storage, which no other app can read) and never reach the web view: the UI
+// AI provider plumbing. API keys live in the Windows Credential Manager (on Android and Linux, in a
+// file only this user can read, in the app's private storage) and never reach the web view: the UI
 // sends requests with a placeholder where the key goes, and this module swaps the real key in on
 // the way out. Requests go out from here, so provider CORS rules never apply.
 use crate::store::Res;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-#[cfg(not(target_os = "android"))]
+#[cfg(windows)]
 const SERVICE: &str = "goodink";
 const SECRET_MARK: &str = "__GOODINK_SECRET__";
 
@@ -15,7 +15,7 @@ fn check_name(name: &str) -> Res<()> {
     if ok { Ok(()) } else { Err("bad secret name".into()) }
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(windows)]
 mod vault {
     use super::*;
     fn entry(name: &str) -> Res<keyring::Entry> {
@@ -36,7 +36,7 @@ mod vault {
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(not(windows))]
 mod vault {
     use super::*;
     use std::collections::BTreeMap;

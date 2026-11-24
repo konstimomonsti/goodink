@@ -120,6 +120,15 @@ fn ort_init() -> Res<String> {
         // it by name in the app's own libraries, which are not files on disk
         #[cfg(target_os = "android")]
         cands.push(PathBuf::from("libonnxruntime.so"));
+        // Linux: the .deb installs ONNX Runtime next to goodink (/usr/lib/goodink)
+        #[cfg(target_os = "linux")]
+        {
+            cands.push(models_root().join("runtime").join("libonnxruntime.so"));
+            if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+                cands.push(dir.join("../lib/goodink/libonnxruntime.so"));
+            }
+            cands.push(PathBuf::from("/usr/lib/goodink/libonnxruntime.so"));
+        }
         let mut errs = vec![];
         for c in cands.iter().filter(|c| c.exists() || cfg!(target_os = "android") && c.is_relative()) {
             match ort::init_from(c) {

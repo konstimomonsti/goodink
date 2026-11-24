@@ -13,7 +13,7 @@ import { parseRange } from './pageOps';
 import { extractDisplay, mathParts, mathToPlain, MathHtml, renderParts, RichText, hasMath } from '../ui/Math';
 import { Button, Field, IconButton, Modal, Segmented, Spinner } from '../ui/primitives';
 import { LiveSettingsSection } from '../live/ui/StatusPill';
-import { isAndroid } from '../lib/util';
+import { isAndroid, isWindows } from '../lib/util';
 import {
   PROVIDERS, PROVIDER_IDS, DEFAULT_AI, cleanModel, FREE_PROVIDER, FREE_KEY_URL, withDefaults, PAGES_PER_REQUEST, choiceFrom, readyProviders, listModels, saveKey, removeKey, savedKeys, aiError, generateSummary, chat, ASK_SYSTEM, MAX_ASK_PAGES,
   type AiChoice, type AiSettings, type Card, type PageImage, type ProviderId, type Turn,
@@ -218,7 +218,7 @@ export function AiSettingsSection() {
   return (
     <section>
       <h3>AI</h3>
-      <p className="field-hint ai-intro">Make flashcards and summaries and ask questions about your notes. Pages are sent as images to the AI provider, and its model reads your handwriting. Keys are stored {isAndroid ? 'in goodink’s private app storage' : 'in Windows Credential Manager'}, not in your library.</p>
+      <p className="field-hint ai-intro">Make flashcards and summaries and ask questions about your notes. Pages are sent as images to the AI provider, and its model reads your handwriting. Keys are stored {isWindows ? 'in Windows Credential Manager' : isAndroid ? 'in goodink’s private app storage' : 'in a private file only your user can read'}, not in your library.</p>
       <FreeAiSetup />
       <LiveSettingsSection />
       <div className="ai-custom-toggle">

@@ -54,9 +54,35 @@ fn profile_dir() -> PathBuf {
     }
     #[cfg(target_os = "android")]
     return android_files_dir();
+    // Linux: $XDG_DATA_HOME/goodink, normally ~/.local/share/goodink
+    #[cfg(target_os = "linux")]
+    {
+        let data = std::env::var("XDG_DATA_HOME").ok().filter(|d| d.starts_with('/')).map(PathBuf::from);
+        if let Some(d) = data.or_else(|| std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".local").join("share"))) {
+            return d.join("goodink");
+        }
+    }
     #[allow(unreachable_code)]
     let base = std::env::var("APPDATA").map(PathBuf::from).unwrap_or_else(|_| std::env::temp_dir());
     base.join("goodink")
+}
+
+/// Linux: the user's Documents folder, under its own name in their language (XDG user dirs,
+/// e.g. ~/Dokumente), else ~/Documents.
+#[cfg(target_os = "linux")]
+fn linux_documents() -> Option<PathBuf> {
+    let home = PathBuf::from(std::env::var("HOME").ok()?);
+    let dirs = fs::read_to_string(home.join(".config").join("user-dirs.dirs")).unwrap_or_default();
+    let named = dirs.lines().find_map(|l| {
+        let v = l.trim().strip_prefix("XDG_DOCUMENTS_DIR=")?.trim_matches('"');
+        let p = match v.strip_prefix("$HOME") {
+            Some(rest) => home.join(rest.trim_start_matches('/')),
+            None => PathBuf::from(v),
+        };
+        // a Documents dir set to the home folder itself means "none"
+        (p != home).then_some(p)
+    });
+    named.or_else(|| Some(home.join("Documents"))).filter(|d| d.is_dir())
 }
 
 /// Android: the app's private files folder, /data/user/0/<package>/files. Known before Tauri starts
@@ -109,6 +135,9 @@ fn library_root() -> PathBuf {
 
 /// A new install's home folder: "goodink" in Documents, where it can be seen and backed up.
 fn home_folder() -> Option<PathBuf> {
+    #[cfg(target_os = "linux")]
+    return Some(linux_documents().map(|d| d.join("goodink")).unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("goodink")));
+    #[allow(unreachable_code)]
     let docs = std::env::var("USERPROFILE").ok().map(|u| PathBuf::from(u).join("Documents")).filter(|d| d.is_dir())?;
     Some(docs.join("goodink"))
 }
@@ -881,6 +910,14 @@ fn browser_args() -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     T_MAIN.store(now_ms(), Ordering::Relaxed);
+    #[cfg(target_os = "linux")]
+    {
+        // WebKitGTK's DMA-BUF renderer draws a blank window with NVIDIA's own driver: use the
+        // older path there only (set before the web view starts; a user's own choice wins)
+        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() && Path::new("/proc/driver/nvidia/version").exists() {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+    }
     #[cfg(target_os = "android")]
     {
         // /data/local/tmp (std's default) is not writable for apps

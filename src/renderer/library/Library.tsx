@@ -11,7 +11,7 @@ import {
   FILE_ID, openLibraryFile, pickFiles, importImageFiles, filePath, pickOneNote, pickGoodnotes,
 } from '../lib/store';
 import { api } from '../lib/api';
-import { formatDate } from '../lib/util';
+import { fileManager, formatDate } from '../lib/util';
 import { domainOf } from '../lib/web';
 import { youtubeId } from '../study/youtube';
 import { AddLinkDialog } from './LinkDialogs';
@@ -319,7 +319,7 @@ function LibraryMain() {
           { label: 'Open', icon: <BookOpen size={15} />, run: () => void openNotebook(n.id) },
           { label: n.favorite ? 'Remove from Favourites' : 'Add to Favourites', icon: <Star size={15} />, run: () => toggleFavorite(n.id) },
           { separator: true, label: '' },
-          ...(api.canReveal ? [{ label: 'Show in Explorer', icon: <FolderOpen size={15} />, run: () => void api.reveal({ id: n.id }) }] : []),
+          ...(api.canReveal ? [{ label: `Show in ${fileManager}`, icon: <FolderOpen size={15} />, run: () => void api.reveal({ id: n.id }) }] : []),
           { label: 'Rename', icon: <Pencil size={15} />, shortcut: 'F2', run: () => openDialog({ type: 'rename', kind: 'notebook', id: n.id }) },
           { label: 'Change cover', icon: <Palette size={15} />, run: () => openDialog({ type: 'cover', nbId: n.id }) },
           { label: 'Duplicate', icon: <Copy size={15} />, run: () => void duplicateNotebook(n.id) },
@@ -354,7 +354,7 @@ function LibraryMain() {
           { separator: true, label: '' },
           { label: 'Make flashcards in Study…', icon: <GraduationCap size={15} />, run: () => makeCardsFrom(k.id) },
           { separator: true, label: '' },
-          ...(api.canReveal ? [{ label: 'Show in Explorer', icon: <FolderOpen size={15} />, run: () => void api.reveal({ id: k.id }) }] : []),
+          ...(api.canReveal ? [{ label: `Show in ${fileManager}`, icon: <FolderOpen size={15} />, run: () => void api.reveal({ id: k.id }) }] : []),
           { label: 'Rename', icon: <Pencil size={15} />, shortcut: 'F2', run: () => openDialog({ type: 'rename', kind: 'link', id: k.id }) },
           { label: 'Move to…', icon: <FolderInput size={15} />, run: () => openDialog({ type: 'move', ids: picked.includes(k.id) ? picked : [k.id] }) },
           { separator: true, label: '' },
@@ -373,7 +373,7 @@ function LibraryMain() {
           { label: 'Open', icon: <FolderIcon size={15} />, run: () => showSection('all', f.id) },
           { label: 'Study this folder', icon: <GraduationCap size={15} />, run: () => studyFolder(f.id) },
           { label: 'Find sources into this folder…', icon: <Sparkles size={15} />, run: () => setFind(f.id) },
-          ...(api.canReveal ? [{ label: 'Show in Explorer', icon: <FolderOpen size={15} />, run: () => void api.reveal({ id: f.id }) }] : []),
+          ...(api.canReveal ? [{ label: `Show in ${fileManager}`, icon: <FolderOpen size={15} />, run: () => void api.reveal({ id: f.id }) }] : []),
           { label: 'Rename', icon: <Pencil size={15} />, run: () => openDialog({ type: 'rename', kind: 'folder', id: f.id }) },
           { label: 'Move to…', icon: <FolderInput size={15} />, run: () => openDialog({ type: 'move', ids: [f.id] }) },
           { separator: true, label: '' },
@@ -396,7 +396,7 @@ function LibraryMain() {
         { label: pdf ? 'Open in goodink to write on' : 'Open', icon: pdf ? <BookOpen size={15} /> : <ExternalLink size={15} />, run: () => void openLibraryFile(f) },
         ...(pdf ? [{ label: 'Open in its usual app', icon: <ExternalLink size={15} />, run: () => void api.fileOpen(f.rel) }] : []),
         ...(img ? [{ label: 'Make a notebook from it', icon: <BookOpen size={15} />, run: () => void importImageFiles([filePath(f.rel)], f.folderId) }] : []),
-        ...(api.canReveal ? [{ label: 'Show in Explorer', icon: <FolderOpen size={15} />, run: () => void api.reveal({ rel: f.rel }) }] : []),
+        ...(api.canReveal ? [{ label: `Show in ${fileManager}`, icon: <FolderOpen size={15} />, run: () => void api.reveal({ rel: f.rel }) }] : []),
         { separator: true, label: '' },
         { label: 'Rename', icon: <Pencil size={15} />, shortcut: 'F2', run: () => openDialog({ type: 'rename', kind: 'file', id: f.rel }) },
         { label: 'Move to…', icon: <FolderInput size={15} />, run: () => openDialog({ type: 'move', ids }) },
@@ -467,7 +467,7 @@ function LibraryMain() {
           {section === 'all' && !query && (
             <>
               {api.canReveal && (
-                <IconButton label={folderId ? 'Show in Explorer' : 'Open the home folder in Explorer'} onClick={() => void api.reveal(folderId ? { id: folderId } : {})}>
+                <IconButton label={folderId ? `Show in ${fileManager}` : `Open the home folder in ${fileManager}`} onClick={() => void api.reveal(folderId ? { id: folderId } : {})}>
                   <FolderOpen size={17} />
                 </IconButton>
               )}

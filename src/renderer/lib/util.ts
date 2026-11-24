@@ -49,4 +49,11 @@ export async function canvasToPng(c: HTMLCanvasElement | OffscreenCanvas): Promi
 export const isMac = false;
 /** Running in the Android app (no window to minimise, the system draws the bars). */
 export const isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
+/** Windows (WebView2): the only system with goodink's built-in recognisers, OCR and Credential Manager. */
+export const isWindows = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent);
+/** Linux desktops (Debian, Ubuntu …, WebKitGTK). */
+export const isLinux = typeof navigator !== 'undefined' && /Linux|X11/i.test(navigator.userAgent) && !isAndroid;
+/** The system's name in messages, and its file manager's name in "Show in …". */
+export const platformName = isAndroid ? 'Android' : isLinux ? 'Linux' : 'Windows';
+export const fileManager = isLinux ? 'Files' : 'Explorer';
 export const modKey =(e: { ctrlKey: boolean; metaKey: boolean }) => e.ctrlKey || e.metaKey;

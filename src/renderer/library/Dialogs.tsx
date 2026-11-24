@@ -7,7 +7,7 @@ import { api } from '../lib/api';
 import { Button, Field, Modal, Segmented, Toggle } from '../ui/primitives';
 import { CoverArt, COVER_COLORS, COVER_STYLES, TemplatePreview } from './CoverArt';
 import { TEMPLATE_LIST } from '../engine/templates';
-import { isAndroid } from '../lib/util';
+import { isWindows, platformName } from '../lib/util';
 // the AI section pulls in the provider SDKs, so it loads only when Settings opens
 const AiSettingsSection = lazy(() => import('../editor/AiDialogs').then((m) => ({ default: m.AiSettingsSection })));
 
@@ -298,8 +298,8 @@ export function SettingsDialog() {
       </Suspense>
       <section>
         <h3>Search</h3>
-        {/* Windows' own text recognition: not on Android */}
-        {!isAndroid && <Toggle label="Make handwriting searchable" hint="Uses the text recognition built into Windows. Nothing leaves this PC." checked={s.ocrEnabled} onChange={(ocrEnabled) => updateSettings({ ocrEnabled })} />}
+        {/* Windows' own text recognition: Windows only */}
+        {isWindows && <Toggle label="Make handwriting searchable" hint="Uses the text recognition built into Windows. Nothing leaves this PC." checked={s.ocrEnabled} onChange={(ocrEnabled) => updateSettings({ ocrEnabled })} />}
       </section>
       <section>
         <h3>Home folder</h3>
@@ -327,7 +327,7 @@ export function SettingsDialog() {
           </Button>
         </div>
       </section>
-      <p className="muted small about">goodink {version} · Handwriting and PDF notes for {isAndroid ? 'Android' : 'Windows'}</p>
+      <p className="muted small about">goodink {version} · Handwriting and PDF notes for {platformName}</p>
     </Modal>
   );
 }
