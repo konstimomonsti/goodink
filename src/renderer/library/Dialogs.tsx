@@ -275,6 +275,9 @@ export function SettingsDialog() {
         <Field label="Fingers and pen" hint="Automatic: on PCs with a pen, fingers scroll and zoom and only the pen writes; without a pen fingers write. “Fingers draw” lets one finger use the current tool on any PC; two fingers always scroll and zoom. Holding a finger still on a placed PDF page or image picks it up.">
           <Segmented label="Stylus mode" value={s.stylusMode} onChange={(stylusMode) => updateSettings({ stylusMode })} options={[{ value: 'auto', label: 'Automatic' }, { value: 'penOnly', label: 'Pen only' }, { value: 'touch', label: 'Fingers draw' }]} />
         </Field>
+        <Field label="Writing hand" hint="The hand you write with. Touches where that hand rests on the screen (below the pen, on its side) never scroll or zoom the page while you write.">
+          <Segmented label="Writing hand" value={s.writingHand ?? 'right'} onChange={(writingHand) => updateSettings({ writingHand })} options={[{ value: 'right', label: 'Right' }, { value: 'left', label: 'Left' }]} />
+        </Field>
         <Toggle label="Pressure sensitivity" hint="Line weight follows how hard you press." checked={s.pressure} onChange={(pressure) => updateSettings({ pressure })} />
         <Toggle label="Hold to draw shapes" hint="Pause at the end of a stroke to snap it into a clean shape." checked={s.holdToShape} onChange={(holdToShape) => updateSettings({ holdToShape })} />
         <Field label={`Hold delay: ${s.holdDelayMs} ms`}>

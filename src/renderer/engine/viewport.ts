@@ -64,6 +64,8 @@ export interface ToolState {
   holdDelay: number;
   pressure: boolean;
   stylusMode: 'auto' | 'penOnly' | 'touch';
+  /** the hand that holds the pen: its palm rests below and to that side of the pen */
+  writingHand: 'right' | 'left';
   laserMode: 'dot' | 'trail';
   laserColor: string;
   text: TextStyle;
@@ -111,6 +113,21 @@ const PAD = 28;
 const GAP = 22;
 const MAX_CANVAS_PX = 9_000_000;
 const HANDLE = 9;
+/** Palm rejection (see isPalm/penNear): times in ms, distances in CSS px. */
+const PALM = {
+  /** touches are hands while the pen writes or hovers, and this long after */
+  guardMs: 1000,
+  /** a contact wider than this is a palm, never a finger (a fingertip is about 8 mm, 30 px) */
+  contactPx: 56,
+  /** after writing, touches in the resting hand's zone stay hands for this long */
+  zoneMs: 4000,
+  /** the zone: below the pen tip (from a little above it), on the hand's side, this far out */
+  aboveTipPx: 80,
+  besideTipPx: 60,
+  reachPx: 420,
+  /** a touch gesture that began this shortly before the pen came is undone */
+  rewindMs: 700,
+};
 
 interface Action {
   /** true: this action draws ink and takes raw (un-throttled) pointer updates */
@@ -1298,11 +1315,78 @@ export class Viewport {
   private actionPointer = -1;
   private actionType = '';
   private penNearAt = -1e9;
+  /** where the pen was last (client px), for the resting hand's zone */
+  private penX = 0;
+  private penY = 0;
+  /** the view when the current touch gesture began: a hand that lands just before the pen is undone */
+  private touchT = -1e9;
+  private touchSL = 0;
+  private touchST = 0;
+  private touchZoom = 1;
+  /** touches judged to be a resting hand: ignored until they lift */
+  private palms = new Set<number>();
+
+  /**
+   * Palm rejection: is this touch a resting hand rather than a finger? Yes while the pen writes or
+   * is near (and a second after), when the contact is palm-sized, or when it lands where the
+   * writing hand rests after writing: below the pen and to the side of the hand (left-handed
+   * writers rest their palm left of the pen, right-handed ones right of it).
+   */
+  private isPalm(e: PointerEvent) {
+    if (this.action && this.actionType === 'pen') return true;
+    const now = performance.now();
+    if (now - this.penNearAt < PALM.guardMs) return true;
+    if (!this.penSeen) return false;
+    if (Math.max(e.width || 0, e.height || 0) > PALM.contactPx) return true;
+    if (now - this.penNearAt < PALM.zoneMs) {
+      const dx = e.clientX - this.penX, dy = e.clientY - this.penY;
+      const side = this.tools.writingHand === 'left' ? -dx : dx;
+      if (dy > -PALM.aboveTipPx && side > -PALM.besideTipPx && dx * dx + dy * dy < PALM.reachPx * PALM.reachPx) return true;
+    }
+    return false;
+  }
+
+  /**
+   * The pen is near or down, so it owns the page. A touch scroll or pinch stops, and one that
+   * began just before (the hand landing ahead of the pen) is undone, so the page never jumps.
+   */
+  private penNear(e: PointerEvent) {
+    this.penNearAt = performance.now();
+    this.penX = e.clientX;
+    this.penY = e.clientY;
+    if (!this.touches.size) return;
+    if (this.longPress) {
+      clearTimeout(this.longPress);
+      this.longPress = undefined;
+    }
+    if (this.action && this.actionType === 'touch') {
+      this.action.cancel();
+      this.action = null;
+      markInput(false);
+    }
+    this.pinch = null;
+    for (const id of this.touches.keys()) this.palms.add(id);
+    this.touches.clear();
+    if (this.penNearAt - this.touchT < PALM.rewindMs) {
+      if (this.zoom !== this.touchZoom) this.setZoom(this.touchZoom);
+      this.scroller.scrollLeft = this.touchSL;
+      this.scroller.scrollTop = this.touchST;
+    }
+  }
 
   private onDown = (e: PointerEvent) => {
     this.wakeOverlay();
-    // Palm rejection: while the pen is writing or hovering, touches are resting hands, not input.
-    if (e.pointerType === 'touch' && ((this.action && this.actionType === 'pen') || performance.now() - this.penNearAt < 500)) return;
+    if (e.pointerType === 'touch' && this.isPalm(e)) {
+      this.palms.add(e.pointerId);
+      return;
+    }
+    if (e.pointerType === 'touch' && !this.touches.size) {
+      // the view before this gesture, to undo it if the pen follows at once
+      this.touchT = performance.now();
+      this.touchSL = this.scroller.scrollLeft;
+      this.touchST = this.scroller.scrollTop;
+      this.touchZoom = this.zoom;
+    }
     const had = this.action;
     this.downImpl(e);
     if (this.action && this.action !== had) {
@@ -1317,7 +1401,7 @@ export class Viewport {
     if (e.pointerType === 'pen') {
       if (!this.penSeen) this.cb.onPenSeen?.();
       this.penSeen = true;
-      this.penNearAt = performance.now();
+      this.penNear(e);
       this.setPenHover(null);
     }
     if (e.pointerType === 'touch') {
@@ -1639,7 +1723,7 @@ export class Viewport {
     if (e.pointerType === 'pen' && e.buttons === 0 && !this.action) this.setPenHover(e);
     else if (e.pointerType === 'mouse' && this.penHover) this.setPenHover(null);
     if (e.pointerType === 'pen' && !this.overlayAwake) this.wakeOverlay(); // pen hovering: about to write
-    if (e.pointerType === 'pen') this.penNearAt = performance.now();
+    if (e.pointerType === 'pen') this.penNear(e);
     if (this.action?.raw && e.pointerId === this.actionPointer) {
       markInput();
       this.action.move(e);
@@ -1647,7 +1731,7 @@ export class Viewport {
   };
 
   private onMove = (e: PointerEvent) => {
-    if (e.pointerType === 'pen') this.penNearAt = performance.now();
+    if (e.pointerType === 'pen') this.penNear(e);
     if (this.actPage && e.timeStamp - this.actT >= 16 && e.pointerId === this.actionPointer) {
       // the live check keeps red away from where the pen is busy: at most once a frame, numbers only
       const m = this.actInv, cx = e.clientX - this.actOX, cy = e.clientY - this.actOY;
@@ -1678,6 +1762,13 @@ export class Viewport {
   };
 
   private onUp = (e: PointerEvent) => {
+    if (this.palms.delete(e.pointerId)) return;
+    if (e.pointerType === 'pen') {
+      // the hand stays on the page a moment after the pen lifts
+      this.penNearAt = performance.now();
+      this.penX = e.clientX;
+      this.penY = e.clientY;
+    }
     if (e.pointerType === 'touch') {
       this.touches.delete(e.pointerId);
       if (this.pinch && this.touches.size < 2) {
@@ -1708,6 +1799,7 @@ export class Viewport {
   };
 
   private onCancel = (e: PointerEvent) => {
+    if (this.palms.delete(e.pointerId)) return;
     this.touches.delete(e.pointerId);
     if (this.action && e.pointerId !== this.actionPointer) return;
     markInput(false);

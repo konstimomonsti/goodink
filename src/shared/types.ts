@@ -314,6 +314,8 @@ export interface Settings {
   scrollDir: 'vertical' | 'horizontal';
   /** auto: fingers draw until a pen is used; penOnly: fingers always scroll; touch: fingers always draw */
   stylusMode: 'auto' | 'penOnly' | 'touch';
+  /** which hand holds the pen: palm rejection ignores touches where that hand rests */
+  writingHand: 'right' | 'left';
   holdToShape: boolean;
   holdDelayMs: number;
   eraserMode: 'stroke' | 'precise';
@@ -389,6 +391,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
   scrollDir: 'vertical',
   stylusMode: 'auto',
+  writingHand: 'right',
   holdToShape: true,
   holdDelayMs: 550,
   eraserMode: 'precise',
